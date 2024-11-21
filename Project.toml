@@ -5,10 +5,22 @@ version = "0.1.0"
 
 [deps]
 CryptoGroups = "bc997328-bedd-407e-bcd3-5758e064a52d"
+CryptoPRG = "d846c407-34c1-46cb-aa27-d51818cc05e2"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 ShuffleProofs = "31a120cc-b3cb-4d07-bbdb-d498660ddfd8"
+SigmaProofs = "f8559b4c-f045-44a2-8db2-503e40bb7416"
 
 [compat]
-CryptoGroups = "0.4.1"
+CryptoGroups = "0.6.1"
+CryptoPRG = "0.2.0"
 Random = "1.11.0"
-ShuffleProofs = "0.3.1"
+ShuffleProofs = "0.4.3"
+SigmaProofs = "0.2.1"
+Test = "1.11.0"
+
+[extras]
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "SafeTestsets"]

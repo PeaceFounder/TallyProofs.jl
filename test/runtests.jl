@@ -1,6 +1,13 @@
+using SafeTestsets
 
-include("elgamal.jl")
+@safetestset "Supersession" begin
+    include("supersession.jl")
+end
 
-include("components.jl")
+@safetestset "Reveal Shuffle" begin
+    include("reveal.jl")
+end
 
-include("integration.jl")
+@safetestset "Tally Proofs" begin
+    include("tally.jl")
+end
