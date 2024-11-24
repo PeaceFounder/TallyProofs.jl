@@ -17,6 +17,8 @@ gen_roprg() = gen_roprg(rand(RandomDevice(), UInt8, 32))
 
 gen_roprg(prg::PRG) = gen_roprg(prg.s)
 
+include("watermark.jl")
+
 include("supersession.jl")
 include("pedersen.jl")
 include("reveal.jl")

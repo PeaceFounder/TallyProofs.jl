@@ -8,6 +8,7 @@ using SigmaProofs.Parser: Tree, encode
 using SigmaProofs.Verificatum: generator_basis, GeneratorBasis
 import SigmaProofs: prove, verify, proof_type
 
+using .HMACWatermark: apply_watermark, verify_watermark
 
 struct Signature{G <: Group}
     pbkey::G
@@ -109,7 +110,20 @@ function VotingCalculator(proposal::Proposal{G}, verifier::Verifier, key::Intege
 end
 
 
-function compute_tracker(voter::VotingCalculator, challenge::Integer, pin::Int)
+function tracker_challenge(ux::G, chg::Vector{UInt8}, token::Integer, hasher::HashSpec) where G <: Group
+
+    token_bytes = zeros(UInt8, 8)
+    int2octet!(token_bytes, BigInt(token)) # ToDo: fix for CryptoGroups
+    
+    prg = PRG(hasher, [octet(ux); chg; token_bytes])
+
+    rand(prg, 2:order(G)-1)
+end
+
+
+function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int)
+
+    challenge = tracker_challenge(voter.supersession.ux, voter.challenge, token, voter.hasher)
 
     if voter.pin == pin
         
@@ -132,7 +146,6 @@ struct SignedVoteCommitment{G <: Group}
 end
 
 struct CastOppening{G <: Group}
-    #recommit::ReCommit{G}
     β::BigInt # For supersession
     history::Vector{BigInt}
     
@@ -204,6 +217,13 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
 end
 
 
+struct TallySetup{G}
+    generators::GeneratorSetup{G}
+    token_max::Int
+    watermark_nbits::Int
+end
+
+
 struct TallyRecord{G <: Group}
     T::G
     tracker::BigInt
@@ -211,8 +231,7 @@ struct TallyRecord{G <: Group}
 end
 
 struct Tally{G <: Group} <: Proposition
-    setup::GeneratorSetup # we shall instantiate generators from a verifier
-    tracker_range::UnitRange
+    setup::TallySetup{G}
     cast_commitments::Vector{G}
     vote_commitments::Vector{SignedVoteCommitment{G}}
     skip_list::Vector{G} # In case voter had cast a vote with other means
@@ -245,24 +264,30 @@ function extract_supersession(cast_oppenings::Vector{<:CastOppening})
     return mask
 end
 
-function tally(setup::GeneratorSetup{G}, cast_commitments::Vector{G}, cast_oppenings::Vector{CastOppening{G}}, hasher::HashSpec; skip_list = G[], mask = extract_supersession(cast_oppenings), tracker_range = 1:9999_9999) where G <: Group
+
+function tally(setup::GeneratorSetup{G}, cast_commitments::Vector{G}, cast_oppenings::Vector{CastOppening{G}}, hasher::HashSpec; skip_list = G[], mask = extract_supersession(cast_oppenings), token_max = 9999_9999, watermark_nbits = 2) where G <: Group
+
+    tally_setup = TallySetup(setup, token_max, watermark_nbits)
 
     public_cast_oppenings = @view(cast_oppenings[mask])
-
-    pseudonyms = [i.commitment.signature.pbkey for i in cast_oppenings]
-    u = [map2generator(pi, hasher) for pi in @view(pseudonyms[mask])]
-    ux = [i.commitment.ux for i in public_cast_oppenings] # will be significant
     
+    pseudonyms = (i.commitment.signature.pbkey for i in public_cast_oppenings)
+    u = [map2generator(pi, hasher) for pi in pseudonyms]
+    ux = [i.commitment.ux for i in public_cast_oppenings] # will be significant
+
     buffer = IOBuffer()
     for i in public_cast_oppenings
         write(buffer, i.commitment.challenge)
     end
 
     prg = PRG(hasher, [octet(prod(ux)); take!(buffer)])
-    tracker_challenges = rand(prg, tracker_range, length(ux))
 
-    # Here we would need to follow up with tracker challenge invalidation
-    _tracker_challenges = tracker_challenges .|> BigInt
+    nbits = ndigits(token_max, base=2) - 1
+    offset = token_max - 2^nbits
+
+    token_seeds = rand(prg, 0:2^nbits - 1, length(ux))
+    tokens = [apply_watermark(ti, nbits, octet(uxi), hasher; num_positions = watermark_nbits) + offset for (ti, uxi) in zip(token_seeds, ux)]
+    _tracker_challenges = [tracker_challenge(i.commitment.ux, i.commitment.challenge, ti, hasher) for (i, ti) in zip(public_cast_oppenings, tokens)]
 
     vote_oppenings = (i.oppening for i in public_cast_oppenings)
     trackers = (tracker(oppening, chg, setup) for (chg, oppening) in zip(_tracker_challenges, vote_oppenings))
@@ -271,7 +296,7 @@ function tally(setup::GeneratorSetup{G}, cast_commitments::Vector{G}, cast_oppen
 
     vote_commitments = [i.commitment for i in public_cast_oppenings]
 
-    return Tally(setup, tracker_range, cast_commitments, vote_commitments, skip_list, _tracker_challenges, tally)
+    return Tally(tally_setup, cast_commitments, vote_commitments, skip_list, tokens, tally)
 end
 
 
@@ -289,33 +314,31 @@ function reduce_representation(cast_oppenings::Vector{CastOppening{G}}, u::Vecto
     return reduce_representation(recommits, u, ux, history)
 end
 
-function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector{CastOppening{G}}; mask = extract_supersession(cast_oppenings), roprg = gen_roprg()) where G <: Group
+function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector{CastOppening{G}}, 𝛙::Vector{Int}; mask = extract_supersession(cast_oppenings), roprg = gen_roprg()) where G <: Group
 
     hasher = verifier.prghash
 
     u = [map2generator(i.signature.pbkey, hasher) for i in proposition.vote_commitments]
     ux = [i.ux for i in proposition.vote_commitments]
     pok = [i.pok for i in proposition.vote_commitments]
+
     history = [i.history for i in @view(cast_oppenings[mask])]
 
     ψ, α = reduce_representation(cast_oppenings, u, ux, history, hasher)
     β = [i.β for i in cast_oppenings]
 
-    supersession_proposition = Supersession(proposition.cast_commitments, proposition.setup.h, u, ux, pok)
+    supersession_proposition = Supersession(proposition.cast_commitments, proposition.setup.generators.h, u, ux, pok)
 
     supersession_proof = prove(supersession_proposition, verifier, ψ, β, α) # pok are dublicated. Perhaps I could move pok into proposition
 
-    # tracker_challenges can be different here will need to be recomputed 
-    tracker_challenges = proposition.tracker_challenges .|> BigInt
+    tracker_challenges = [tracker_challenge(i.ux, i.challenge, ti, hasher) for (i, ti) in zip(proposition.vote_commitments, proposition.tracker_challenges)]
 
     vote_commitments = [i.commitment for i in proposition.vote_commitments]
-    reveal_proposition = RevealShuffle(proposition.setup, tracker_challenges, vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
-
-    𝛙 = collect(1:length(reveal_proposition)) # Could be extracted from sortperm
-    𝐫′ = rand(roprg(:𝐫′), 2:order(G)-1, length(vote_commitments)) # 𝐫′ is not used in reveal
+    reveal_proposition = RevealShuffle(proposition.setup.generators, tracker_challenges, vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
 
     vote_oppenings = [i.oppening for i in @view(cast_oppenings[mask])]
-    reveal_proof = prove(reveal_proposition, verifier, vote_oppenings, 𝐫′, 𝛙; roprg)    
+
+    reveal_proof = prove(reveal_proposition, verifier, vote_oppenings, 𝛙; roprg)    
 
     return TallyProof(supersession_proof, reveal_proof)
 end
@@ -328,10 +351,17 @@ function tally(cast_commitments::Vector{G}, cast_oppenings::Vector{CastOppening{
     h, d, t, o = generator_basis(verifier, G, 4)
     setup = GeneratorSetup(h, d, t, o)
 
-    mask = extract_supersession(cast_oppenings)
+    filter_mask = extract_supersession(cast_oppenings)
+    commit_perm = sortperm(@view(cast_oppenings[filter_mask]); by = x -> x.commitment.signature.pbkey)
+    
+    mask = findall(filter_mask)[commit_perm]
 
     proposition = tally(setup, cast_commitments, cast_oppenings, hasher; skip_list, mask)
-    proof = prove(proposition, verifier, cast_oppenings; mask)
+
+    𝛙 = sortperm(proposition.tally, by = x -> x.tracker)
+    permute!(proposition.tally, 𝛙)
+
+    proof = prove(proposition, verifier, cast_oppenings, 𝛙; mask) # tally_perm would be the second
 
     return Simulator(proposition, proof, verifier)    
 end
@@ -345,13 +375,14 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     ux = [i.ux for i in proposition.vote_commitments]
     pok = [i.pok for i in proposition.vote_commitments]
     
-    supersession_proposition = Supersession(proposition.cast_commitments, proposition.setup.h, u, ux, pok)
+    supersession_proposition = Supersession(proposition.cast_commitments, proposition.setup.generators.h, u, ux, pok)
     verify(supersession_proposition, proof.supersession, verifier) || return false
 
-    tracker_challenges = proposition.tracker_challenges .|> BigInt
+    tracker_challenges = [tracker_challenge(i.ux, i.challenge, ti, hasher) for (i, ti) in zip(proposition.vote_commitments, proposition.tracker_challenges)]
+
     vote_commitments = [i.commitment for i in proposition.vote_commitments]
 
-    reveal_proposition = RevealShuffle(proposition.setup, tracker_challenges, vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
+    reveal_proposition = RevealShuffle(proposition.setup.generators, tracker_challenges, vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
     verify(reveal_proposition, proof.reveal, verifier) || return false
     
     return true

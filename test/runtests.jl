@@ -1,5 +1,9 @@
 using SafeTestsets
 
+@safetestset "Token Watermark" begin
+    include("watermark.jl")
+end
+
 @safetestset "Supersession" begin
     include("supersession.jl")
 end

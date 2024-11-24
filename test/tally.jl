@@ -73,6 +73,7 @@ eve = VotingCalculator(proposal, verifier, eve_key, pin)
 alice_receipt = cast_vote!(alice, 3, 45534, pin)
 bob_receipt = cast_vote!(bob, 4, 34534, pin)
 eve_receipt = cast_vote!(eve, 7, 9992, pin)
+bob_receipt = cast_vote!(bob, 2, 3454, pin)
 
 simulator = tally(cast_commitments, cast_oppenings, verifier)
 @test verify(simulator)

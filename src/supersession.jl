@@ -22,10 +22,14 @@ mutable struct SupersessionCalculator{G <: Group}
     const u::G
     history::Vector{BigInt} # qs, this needs to be carried over
     x::BigInt # The current value
+    ux::G # also the current value
     verifier::Verifier
     prghash::HashSpec
 
-    SupersessionCalculator(h::G, u::G, verifier::Verifier, prghash::HashSpec) where G <: Group = new{G}(h, u, BigInt[], rand(2:order(G)-1), verifier, prghash)
+    function SupersessionCalculator(h::G, u::G, verifier::Verifier, prghash::HashSpec; roprg = gen_roprg()) where G <: Group
+        x = rand(roprg(:x), 2:order(G)-1)
+        new{G}(h, u, BigInt[], x, u^x, verifier, prghash)
+    end
 end
 
 SupersessionCalculator(h::G, u::G, verifier::ProtocolSpec) where G <: Group = SupersessionCalculator(h, u, verifier, verifier.prghash)
@@ -67,6 +71,7 @@ function recommit!(calc::SupersessionCalculator{G}, chg::Integer) where G <: Gro
     
     push!(calc.history, q)
     calc.x = x′
+    calc.ux = ux
     
     # Return the history without the first element
     recommit = ReCommit(β, u, ux, calc.history[2:end], pok)
@@ -80,6 +85,15 @@ struct Supersession{G <: Group} <: Proposition
     u::Vector{G}
     ux::Vector{G} # superseeded session identifiers
     pok::Vector{SchnorrProof{G}}
+end
+
+function Base.permute!(proposition::Supersession, ψ::Vector{Int})
+
+    permute!(proposition.u, ψ)
+    permute!(proposition.ux, ψ)
+    permute!(proposition.pok, ψ)
+
+    return
 end
 
 struct SupersessionProof{G <: Group} <: Proof
@@ -144,39 +158,6 @@ function verify(proposition::Supersession{G}, proof::SupersessionProof{G}, verif
 
     return A * prod(C .^ 𝐞) == h^s * prod(ux .^ 𝐭)
 end
-
-
-# function extract_supersession(recommits::Vector{ReCommit{G}}) where G <: Group
-#     # Use unique to get distinct u values more efficiently
-#     #u_vec = unique(r.u for r in recommits) # need to improve CryptoGroups here
-#     u_vec = convert(Vector{G}, unique(octet, r.u for r in recommits))
-    
-#     # Preallocate output vectors with known size
-#     n = length(u_vec)
-#     ux_vec = Vector{G}(undef, n)
-#     pok_vec = Vector{SchnorrProof{G}}(undef, n)
-#     history_vec = Vector{Vector{BigInt}}(undef, n)
-
-#     # Group recommits by u value using a dictionary for O(1) lookup
-#     recommits_by_u = Dict(u => ReCommit{G}[] for u in u_vec)
-#     for r in recommits
-#         push!(recommits_by_u[r.u], r)
-#     end
-    
-#     # Process each unique u value
-#     for (i, u) in enumerate(u_vec)
-#         # Find recommit with longest history for current u
-#         last_recommit = argmax(r -> length(r.history), recommits_by_u[u])
-        
-#         # Store results directly in preallocated vectors
-#         ux_vec[i] = last_recommit.ux
-#         pok_vec[i] = last_recommit.pok
-#         history_vec[i] = last_recommit.history
-                                          
-#     end
-    
-#     return u_vec, ux_vec, pok_vec, history_vec
-# end
 
 
 function extract_maximum_mask(identifiers::Vector{<:Any}, values::Vector{Int})
@@ -256,7 +237,11 @@ function supersess(C::Vector{G}, h::G, recommits::Vector{ReCommit{G}}, verifier:
     mask = extract_supersession(recommits)
     proposition = supersess(C, h, recommits; mask)
 
+    perm = sortperm(proposition.u)
+    permute!(proposition, perm)
+
     history = [r.history for r in @view(recommits[mask])]
+    permute!(history, perm)
 
     ψ, α = reduce_representation(recommits, proposition.u, proposition.ux, history)
 

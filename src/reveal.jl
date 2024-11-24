@@ -72,15 +72,16 @@ function commitment(record::VoteRecord{G}, s::BigInt, setup::GeneratorSetup{G}) 
     return C
 end
 
-# note that skip_list is as higher level
 struct RevealShuffle{G <: Group} <: Proposition
     setup::GeneratorSetup{G}
     tracker_challenges::Vector{BigInt}
-    vote_commitments::Vector{VoteCommitment{G}} # vote commitments
-    tally::Vector{VoteRecord{G}} # revealed trackers, 
+    vote_commitments::Vector{VoteCommitment{G}} 
+    tally::Vector{VoteRecord{G}} 
 end
 
 Base.length(proposition::RevealShuffle) = length(proposition.vote_commitments)
+
+Base.permute!(proposition::RevealShuffle, ψ::Vector{Int}) = permute!(proposition.tally, ψ)
 
 struct RevealShuffleProof{G <: Group} <: Proof
     shuffle::PoSProof{G, 1}
@@ -100,10 +101,7 @@ function tracker(vote_oppening::VoteOppening, chg::BigInt, setup::GeneratorSetup
     return T
 end
 
-function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_oppenings::Vector{<:VoteOppening}; 
-                roprg = gen_roprg(), 
-                𝐫′ = rand(roprg(:𝐫′), 2:order(G)-1, length(vote_commitments)),
-                ) where {G <: Group}
+function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_oppenings::Vector{<:VoteOppening}) where {G <: Group}
     
     (; d, t, o) = setup
 
@@ -114,30 +112,28 @@ end
 
 function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_oppenings::Vector{<:VoteOppening}, verifier::Verifier; roprg = gen_roprg()) where G <: Group
 
-    𝐫′ = rand(roprg(:𝐫′), 2:order(G)-1, length(vote_commitments))
+    proposition = reveal(setup, tracker_challenges, vote_commitments, vote_oppenings)
+    
+    𝛙 = sortperm(proposition.tally, by = x -> x.tracker)
+    permute!(proposition, 𝛙)
 
-    proposition = reveal(setup, tracker_challenges, vote_commitments, vote_oppenings; 𝐫′)
-
-    𝛙 = collect(1:length(proposition)) # Could be extracted from sortperm
-
-    proof = prove(proposition, verifier, vote_oppenings, 𝐫′, 𝛙; roprg)
+    proof = prove(proposition, verifier, vote_oppenings, 𝛙; roprg)
 
     return Simulator(proposition, proof, verifier)
 end
 
-function prove(proposition::RevealShuffle, verifier::Verifier, vote_oppenings::Vector{<:VoteOppening}, 𝐫′::Vector{<:Integer}, 𝛙::Vector{<:Integer}; roprg = gen_roprg())
+function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_oppenings::AbstractVector{<:VoteOppening}, 𝛙::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
 
     (; setup, tally, tracker_challenges, vote_commitments) = proposition
     (; h, d, t) = proposition.setup
 
-    θ = collect(i.θ for i in vote_oppenings)
-    λ = collect(i.λ for i in vote_oppenings)
+    𝐫′ = rand(roprg(:𝐫′), 2:order(G)-1, length(vote_commitments))
 
     α = (i.α for i in vote_oppenings)
     β = (i.β for i in vote_oppenings)
-    λ = (i.λ for i in vote_oppenings)
 
     s = α .* tracker_challenges .+ β + 𝐫′
+    permute!(s, 𝛙)
 
     C_vec = (commitment(com, chg) for (com, chg) in zip(vote_commitments, tracker_challenges))
     𝐞 = [ElGamalRow(Ci, Ci) for Ci in C_vec]
@@ -151,7 +147,10 @@ function prove(proposition::RevealShuffle, verifier::Verifier, vote_oppenings::V
 
     trackers = (i.tracker for i in tally)
     
-    tracker_proofs = [prove(PedersenCommitment(d, t, Ti), verifier, λi * ei, θi; roprg = gen_roprg(roprg("$Ti"))) for (Ti, ei, λi, θi) in zip(trackers, tracker_challenges, λ, θ)]
+    θ = (i.θ for i in @view(vote_oppenings[𝛙]))
+    λ = (i.λ for i in @view(vote_oppenings[𝛙]))
+
+    tracker_proofs = [prove(PedersenCommitment(d, t, Ti), verifier, λi * ei, θi; roprg = gen_roprg(roprg("$Ti"))) for (Ti, ei, λi, θi) in zip(trackers, @view(tracker_challenges[𝛙]), λ, θ)]
 
     return RevealShuffleProof(shuffle_proof, s, tracker_proofs)
 end
