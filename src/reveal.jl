@@ -11,6 +11,8 @@ struct GeneratorSetup{G <: Group}
     o::G
 end
 
+Base.:(==)(x::T, y::T) where T <: GeneratorSetup = x.h == y.h && x.d == y.d && x.t == y.t && x.o == y.o
+
 struct VoteCommitment{G <: Group}
     Q::G # tracker commitment
     C::G # vote commitment with tracker blinding generator

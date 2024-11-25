@@ -25,4 +25,6 @@ include("reveal.jl")
 
 include("tally.jl")
 
+include("parser.jl")
+
 end
