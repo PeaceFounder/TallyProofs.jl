@@ -33,66 +33,51 @@ function randperm(prg::PRG, n::Int; m::Int = n)
     return perm
 end
 
-# We will have apply_watermark! and verify_watermark
 """
-    apply_watermark!(token::BitVector, key::Integer, hasher::HashSpec; num_positions::Integer=8) -> BitVector
+    apply_watermark!(token::BitVector, key::Integer, hasher::HashSpec; num_positions::Integer=4) -> BitVector
 
 Embed truncated HMAC bits at positions determined by key.
 Returns modified token with embedded HMAC watermark.
 """
-function apply_watermark!(token::BitVector, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=2)
+function apply_watermark!(token::BitVector, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=4)
 
     prg = PRG(hasher, key)
     positions = sort(randperm(prg, length(token); m = num_positions))
-    
-    # Clear positions in token for HMAC computation
-    for pos in positions
-        token[pos] = false
-    end
 
-    bytes = bits2octet(token)
-    hmac = hasher([key; bytes])
-    hmac_bits = octet2bits(hmac)[1:num_positions]
+    encoded_bits = octet2bits(hasher(key))[1:num_positions]
     
-    # Embed HMAC bits at selected positions
     for (i, pos) in enumerate(positions)
-        token[pos] = hmac_bits[i]
+        token[pos] = encoded_bits[i]
     end
     
     return token
 end
 
-apply_watermark(token::BitVector, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=2) = apply_watermark!(copy(token), key, hasher; num_positions)
+apply_watermark(token::BitVector, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=4) = apply_watermark!(copy(token), key, hasher; num_positions)
 
-function apply_watermark(token::T, nbits::Int, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=2) where T <: Integer
+function apply_watermark(token::T, nbits::Int, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=4) where T <: Integer
 
     token_bits = int2bits(token, nbits)
     apply_watermark!(token_bits, key, hasher; num_positions)
-    
-    return bits2int(T, token_bits)
+
+    new_token = bits2int(T, token_bits)
+
+    return new_token
 end
 
 
 """
-    verify_hmac_watermark(token::BitVector, key::Integer, num_positions::Integer=8) -> Bool
+    verify_watermark(token::BitVector, key::Integer; num_positions::Integer=4) -> Bool
 
 Verify if token contains correct HMAC bits at key-determined positions.
 """
-function verify_watermark(token::BitVector, key::Vector{UInt8}, hasher::HashSpec; num_positions::Integer=2)
+function verify_watermark(token::BitVector, key::Vector{UInt8}, hasher::HashSpec; num_positions::Integer=4)
     
     # Generate same deterministic bit positions
     prg = PRG(hasher, key)
     positions = sort(randperm(prg, length(token); m = num_positions))
-    
-    # Create base token with cleared verification bits
-    result = copy(token)
-    for pos in positions
-        result[pos] = false
-    end
 
-    bytes = bits2octet(result)
-    hmac = hasher([key; bytes])
-    expected_bits = octet2bits(hmac)[1:num_positions]
+    expected_bits = octet2bits(hasher(key))[1:num_positions]
     
     # Extract actual bits from token
     actual_bits = BitVector(undef, num_positions)
@@ -104,7 +89,7 @@ function verify_watermark(token::BitVector, key::Vector{UInt8}, hasher::HashSpec
     return actual_bits == expected_bits
 end
 
-verify_watermark(token::Integer, nbits::Int, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=2) = verify_watermark(int2bits(token, nbits), key, hasher; num_positions)
+verify_watermark(token::Integer, nbits::Int, key::Vector{UInt8}, hasher::HashSpec; num_positions::Int=4) = verify_watermark(int2bits(token, nbits), key, hasher; num_positions)
 
 
 end # module

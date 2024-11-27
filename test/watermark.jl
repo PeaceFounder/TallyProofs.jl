@@ -12,7 +12,7 @@ num_positions = 2 # This equals to a probability P = 1/2^2 * 1/C(6, 2)
 result = apply_watermark(copy(token), key, hasher; num_positions)
 @test verify_watermark(result, key, hasher; num_positions)
 
-result[5] = !result[5]
+result[4] = !result[4]
 @test !verify_watermark(result, key, hasher; num_positions)
 
 nbits = 17
@@ -20,7 +20,7 @@ token = 1451
 
 @test token == bits2int(Int, int2bits(token, 20))
 
-token = 2455
+token = 2456
 nbits = ndigits(9999, base=2) - 1
 
 watermarked_token = apply_watermark(token, nbits, key, hasher; num_positions)
@@ -38,3 +38,20 @@ for i in 1:1000
     ti = apply_watermark(token_seed, nbits, key, hasher; num_positions) + offset
     @test verify_watermark(ti - offset, nbits, key, hasher; num_positions)
 end
+
+function P(nbits::Int, num_positions::Int)
+
+    hits = 0
+    trials = 2^nbits
+
+    for i in 0:trials
+        if verify_watermark(i, nbits, key, hasher; num_positions)
+            hits += 1
+        end
+    end
+    
+    return hits/trials
+end
+
+@test isapprox(P(10, 2), 1/2^2; atol = 0.01)
+@test isapprox(P(10, 4), 1/2^4; atol = 0.01)

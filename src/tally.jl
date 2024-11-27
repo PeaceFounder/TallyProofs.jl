@@ -8,7 +8,8 @@ using SigmaProofs.Parser: Tree, encode
 using SigmaProofs.Verificatum: generator_basis, GeneratorBasis
 import SigmaProofs: prove, verify, proof_type
 
-using .HMACWatermark: apply_watermark, verify_watermark
+using .HMACWatermark: apply_watermark
+import .HMACWatermark: verify_watermark
 
 struct Signature{G <: Group}
     pbkey::G
@@ -42,7 +43,7 @@ end
 
 struct CoercionTracker
     pin::Int
-    tracker::Vector{UInt8} # set up after the vote
+    tracker::BigInt
 end
 
 struct CoercedVote{G <: Group} # When coercion tracker is put in it can be reduced to CoercionInfo
@@ -60,14 +61,15 @@ struct Proposal{G <: Group}
     basis::GeneratorSetup{G} # new
     watermark_nbits::Int
     token_max::Int # 
+    encrypt_spec::EncryptSpec
 end
 
-function Proposal(g::G, collector::G, verifier::Verifier; spec = UInt8[], watermark_nbits::Int=2, token_max::Int=9999_9999) where G <: Group
+function Proposal(g::G, collector::G, verifier::Verifier; spec = UInt8[], watermark_nbits::Int=4, token_max::Int=9999_9999, encrypt_spec::EncryptSpec=AES256_SHA256()) where G <: Group
 
     h, d, t, o = generator_basis(verifier, G, 4)
     basis = GeneratorSetup(h, d, t, o)
     
-    return Proposal(spec, g, collector, basis, watermark_nbits, token_max)
+    return Proposal(spec, g, collector, basis, watermark_nbits, token_max, encrypt_spec)
 end
 
 struct VotingCalculator{G} # More preciselly it would be VotingCalculatorInstance
@@ -90,6 +92,9 @@ struct VotingCalculator{G} # More preciselly it would be VotingCalculatorInstanc
     λ::BigInt
     T_d::G 
     T_t::G # resutling tracker is Hash(T_d * T_t^e)
+
+    # trigger_token
+    last_token_trigger::Ref{Union{Int, Nothing}} # lest token which watermark have been correct
 
     unresolved_coercions::Vector{CoercedVote}
     coercion_trackers::Vector{CoercionTracker}
@@ -115,7 +120,22 @@ function VotingCalculator(proposal::Proposal{G}, verifier::Verifier, key::Intege
     T_d = d^θ
     T_t = t^λ
     
-    return VotingCalculator(proposal, verifier, hasher, sup_calc, challenge, pseudonym, key |> BigInt, pin, θ, λ, T_d, T_t, CoercedVote[], CoercionTracker[])
+    return VotingCalculator(proposal, verifier, hasher, sup_calc, challenge, pseudonym, key |> BigInt, pin, θ, λ, T_d, T_t, Ref{Union{Int, Nothing}}(nothing), CoercedVote[], CoercionTracker[])
+end
+
+function install_coercion_tracker!(calc::VotingCalculator, fake_tracker::Integer, fake_pin::Int, pin::Int)
+    
+    @check fake_pin != pin "PIN codes can't be equal" # currently it is unclear if it should not be allowed
+
+    if pin == calc.pin || pin in (i.pin for i in calc.coercion_trackers)
+        
+        entry = CoercionTracker(fake_pin, fake_tracker)
+        push!(calc.coercion_trackers, entry)
+
+    else
+        error("Invalid PIN code")
+    end
+
 end
 
 function tracker_challenge(ux::G, chg::Vector{UInt8}, token::Integer, hasher::HashSpec) where G <: Group
@@ -128,19 +148,39 @@ function tracker_challenge(ux::G, chg::Vector{UInt8}, token::Integer, hasher::Ha
     return rand(prg, 2:order(G)-1)
 end
 
-function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int)
 
+function verify_watermark(proposal::Proposal{G}, ux::G, token::Integer, hasher::HashSpec) where G <: Group
+    
+    (; token_max, watermark_nbits) = proposal
+
+    nbits = ndigits(token_max, base=2) - 1
+    offset = token_max - 2^nbits
+    return verify_watermark(token - offset, nbits, octet(ux), hasher; num_positions = watermark_nbits)    
+end
+
+function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; reset_trigger_token::Bool = false)
+
+    if (isnothing(voter.last_token_trigger[]) || reset_trigger_token) && verify_watermark(voter.proposal, voter.supersession.ux, token, voter.hasher)
+        voter.last_token_trigger[] = token
+    end
+
+    if !(voter.pin == pin)
+
+        N = findfirst(x -> x.pin == pin, voter.coercion_trackers)
+        
+        if isnothing(N)
+            error("Incoreect PIN code")
+        elseif voter.last_token_trigger[] == token
+            return voter.coercion_trackers[N].tracker
+        end            
+    end
+    
     challenge = tracker_challenge(voter.supersession.ux, voter.challenge, token, voter.hasher)
 
-    if voter.pin == pin
-        
-        (; T_d, T_t, hasher) = voter
-        
-        T = T_d * T_t^challenge
-        return hasher(octet(T))[1:8] |> octet2int
-    else
-        error("Incoreect PIN code")
-    end
+    (; T_d, T_t, hasher) = voter
+    T = T_d * T_t^challenge
+
+    return hasher(octet(T))[1:8] |> octet2int
 end
 
 struct SignedVoteCommitment{G <: Group}
@@ -159,15 +199,31 @@ struct CastOppening{G <: Group}
     oppening::VoteOppening # Can be further encrypted in a threshold decryption ceremony if one wishes to have that for fairness
 end
 
+function SignedVoteCommitment(proposal::Vector{UInt8}, commitment::VoteCommitment{G}, ux::G, pok::SchnorrProof, challenge::Vector{UInt8}, signer::Signer{G}) where G <: Group
+
+    unsigned_vote_commitment = SignedVoteCommitment(proposal, commitment, ux, pok, challenge, nothing)
+    internal_signature = sign(encode(Tree(unsigned_vote_commitment)), signer.g, signer.key)
+
+    return SignedVoteCommitment(proposal, commitment, ux, pok, challenge, internal_signature)
+end
+
+function verify(vote::SignedVoteCommitment{G}, g::G) where G <: Group
+
+    (; proposal, commitment, ux, pok, challenge) = vote
+    unsigned_vote_commitment = SignedVoteCommitment(proposal, commitment, ux, pok, challenge, nothing)
+    
+    return verify(encode(Tree(unsigned_vote_commitment)), g, vote.signature)
+end
+
 struct Vote{G}
     proposal::Vector{UInt8}
     C::G
     A::G
-    oppening::CastOppening # this will be encrypted
+    oppening::Encryption{CastOppening{G}, G}
     signature::Union{Signature{G}, Nothing}
 end
 
-function Vote(proposal::Vector{UInt8}, C::G, A::G, oppening::CastOppening, signer::Signer{G}) where G <: Group
+function Vote(proposal::Vector{UInt8}, C::G, A::G, oppening::Encryption{CastOppening{G}, G}, signer::Signer{G}) where G <: Group
 
     unsigned_vote = Vote(proposal, C, A, oppening, nothing)
     signature = sign(encode(Tree(unsigned_vote)), signer.g, signer.key)
@@ -188,25 +244,9 @@ function check_challenge(vote::Vote{G}, chg::Integer, hasher::HashSpec) where G 
     return check_challenge(vote.C, vote.A, u, chg, hasher) 
 end
 
-function SignedVoteCommitment(proposal::Vector{UInt8}, commitment::VoteCommitment{G}, ux::G, pok::SchnorrProof, challenge::Vector{UInt8}, signer::Signer{G}) where G <: Group
-
-    unsigned_vote_commitment = SignedVoteCommitment(proposal, commitment, ux, pok, challenge, nothing)
-    internal_signature = sign(encode(Tree(unsigned_vote_commitment)), signer.g, signer.key)
-
-    return SignedVoteCommitment(proposal, commitment, ux, pok, challenge, internal_signature)
-end
-
-function verify(vote::SignedVoteCommitment{G}, g::G) where G <: Group
-
-    (; proposal, commitment, ux, pok, challenge) = vote
-    unsigned_vote_commitment = SignedVoteCommitment(proposal, commitment, ux, pok, challenge, nothing)
-    
-    return verify(encode(Tree(unsigned_vote_commitment)), g, vote.signature)
-end
-
 function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Integer, pin::Int; inherit_challenge=false, roprg = gen_roprg()) where G <: Group
 
-    C, A, sup_oppening = TallyProofs.recommit!(voter.supersession, chg) 
+    C, A, sup_oppening = TallyProofs.recommit!(voter.supersession, chg; roprg = gen_roprg(roprg(:supersession))) 
     (; β, history, ux, pok) = sup_oppening
 
     _α = rand(roprg(:α), 2:order(G) - 1)
@@ -229,7 +269,9 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
 
     cast_oppening = CastOppening(β, history, signed_vote_commitment, oppening)
 
-    return Vote(proposal_hash, C, A, cast_oppening, signer)
+    cast_oppening_enc = encrypt(cast_oppening, voter.proposal.g, voter.proposal.collector, voter.proposal.encrypt_spec)
+
+    return Vote(proposal_hash, C, A, cast_oppening_enc, signer)
 end
 
 struct TallyRecord{G <: Group}
@@ -341,7 +383,7 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector
 
     supersession_proposition = Supersession(proposition.cast_commitments, proposition.proposal.basis.h, u, ux, pok)
 
-    supersession_proof = prove(supersession_proposition, verifier, ψ, β, α) 
+    supersession_proof = prove(supersession_proposition, verifier, ψ, β, α; roprg = gen_roprg(roprg(:supersession))) 
     skip_mask = BitVector(!(x.signature.pbkey in proposition.skip_list) for x in proposition.vote_commitments)
 
     tracker_challenges = [tracker_challenge(i.ux, i.challenge, ti, hasher) for (i, ti) in zip(@view(proposition.vote_commitments[skip_mask]), @view(proposition.tokens[skip_mask]))]
@@ -351,7 +393,7 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector
 
     vote_oppenings = [i.oppening for i in @view(cast_oppenings[mask][skip_mask])]
 
-    reveal_proof = prove(reveal_proposition, verifier, vote_oppenings, 𝛙_reveal; roprg)    
+    reveal_proof = prove(reveal_proposition, verifier, vote_oppenings, 𝛙_reveal; roprg = gen_roprg(roprg(:reveal)))    
 
     return TallyProof(supersession_proof, reveal_proof)
 end
@@ -410,44 +452,4 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     verify(reveal_proposition, proof.reveal, verifier) || return false
     
     return true
-end
-
-# any pin code is sufficient 
-struct CastReceipt
-    alias::Int
-    cast_index::Int
-    chg::BigInt
-end
-
-function get_token(tally::Tally{G}, cast_proofs::Vector{G}, members::Vector{G}, receipt::CastReceipt, hasher::HashSpec; skip_checks=false, commitment_challenge = receipt.chg) where G <: Group
-
-    (; cast_index, alias, chg) = receipt
-
-    C = tally.cast_commitments[cast_index]
-    A = cast_proofs[cast_index]
-
-    pseudonym = members[alias]
-    
-    N = findfirst(x -> x.signature.pbkey == pseudonym, tally.vote_commitments)
-    vote_commitment = tally.vote_commitments[N]
-
-    u = map2generator(pseudonym, hasher)
-
-    @check !check_challenge(C, A, u, chg, hasher) "Cast challenge is not correct. Vote may not have been delivered to the ballotbox by a malicious voters device or there is an error in either challenge, cast_index or alias. Update history tree consistency proofs to ensure that the commitment had been retained on the buletin board."
-    
-    if isnothing(commitment_challenge)
-
-        @warn "Skipping vote commitment challenge. It is not possible to assert exclusive ownership of the pseudonym without putting trust into voting calculator or (tallying authorithy and voting device (to not leak secrets to addversary))."
-        
-    else
-
-        buffer = zeros(UInt8, 16)
-        int2octet!(buffer, chg)
-        blinded_challenge = hasher([buffer; octet(A)])
-
-        @check blinded_challenge == vote_commitment.challenge "Vote commitment challenge incorrect"
-
-    end
-
-    return tally.tokens[N]
 end

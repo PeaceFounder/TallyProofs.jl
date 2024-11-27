@@ -52,11 +52,11 @@ end
 exponent_field(::Type{G}) where G <: Group = FP{static(order(G))}
 
 
-function recommit!(calc::SupersessionCalculator{G}, chg::Integer) where G <: Group
+function recommit!(calc::SupersessionCalculator{G}, chg::Integer; roprg = gen_roprg()) where G <: Group
 
     (; u, h, x, prghash, verifier) = calc
 
-    β = rand(2:order(G)-1)
+    β = rand(roprg(:β), 2:order(G)-1)
     A = h^β * u^x
     
     p = compute_p(A, chg, prghash) 
@@ -117,12 +117,12 @@ function challenge(verifier::ProtocolSpec{G}, proposition::Supersession{G}, A::G
     return rand(prg, 2:order(G) - 1, length(C))
 end
 
-function prove(proposition::Supersession{G}, verifier::Verifier, ψ::Vector{<:Integer}, β::Vector{<:Integer}, α::Vector{<:Integer}) where G <: Group
+function prove(proposition::Supersession{G}, verifier::Verifier, ψ::Vector{<:Integer}, β::Vector{<:Integer}, α::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
 
     (; ux, h, C) = proposition
 
-    z = rand(2:order(G)-1)
-    𝐫 = rand(2:order(G)-1, length(ux))
+    z = rand(roprg(:z), 2:order(G)-1)
+    𝐫 = rand(roprg(:𝐫), 2:order(G)-1, length(ux))
 
     A = h^z * prod(ux .^ 𝐫)
 
@@ -250,6 +250,3 @@ function supersess(C::Vector{G}, h::G, recommits::Vector{ReCommit{G}}, verifier:
 
     return Simulator(proposition, proof, verifier)
 end
-
-
-
