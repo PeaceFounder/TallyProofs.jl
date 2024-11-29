@@ -44,13 +44,13 @@ function Base.convert(::Type{Signature{G}}, tree::Tree) where G <: Group
     return Signature(pbkey, proof)
 end
 
-Parser.Tree(proposal::Proposal) = Tree((proposal.spec, proposal.g, proposal.collector, proposal.basis, proposal.watermark_nbits, proposal.token_max, string(nameof(typeof(proposal.encrypt_spec)))))
+Parser.Tree(proposal::Proposal) = Tree((proposal.spec, proposal.g, proposal.collector, proposal.basis, proposal.watermark_nbits, proposal.token_max, string(nameof(typeof(proposal.encrypt_spec))), proposal.hasher.spec))
 
 
 function Base.convert(::Type{Proposal{G}}, tree::Tree) where G <: Group
-    spec_leaf, g, collector, basis, watermark_nbits, token_max, encrypt_spec = convert(Tuple{Leaf, G, G, GeneratorSetup{G}, Int, Int, String}, tree)
+    spec_leaf, g, collector, basis, watermark_nbits, token_max, encrypt_spec, hash_spec = convert(Tuple{Leaf, G, G, GeneratorSetup{G}, Int, Int, String, String}, tree)
 
-     return Proposal(spec_leaf.x, g, collector, basis, watermark_nbits, token_max, EncryptSpec(Symbol(encrypt_spec)))
+     return Proposal(spec_leaf.x, g, collector, basis, watermark_nbits, token_max, EncryptSpec(Symbol(encrypt_spec)), HashSpec(hash_spec))
 end
 
 function Parser.Tree(c::SignedVoteCommitment)
@@ -66,12 +66,19 @@ function Base.convert(::Type{SignedVoteCommitment{G}}, tree::Tree) where G <: Gr
     return SignedVoteCommitment(proposal_leaf.x, commitment, ux, pok, challenge_leaf.x, signature)
 end
 
-Parser.Tree(c::CastOppening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.commitment, Tree(c.oppening, L)))
+Parser.Tree(decoy::CoercedVote, L::Int) = Tree((Leaf(decoy.θ, L), Leaf(decoy.λ, L), Leaf(decoy.selection, L)))
+
+function Base.convert(::Type{CoercedVote}, tree::Tree)
+    θ, λ, selection = convert(Tuple{BigInt, BigInt, BigInt}, tree)
+    return CoercedVote(θ, λ, selection)
+end
+
+Parser.Tree(c::CastOppening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.commitment, Tree(c.oppening, L), Tree(c.decoy, L)))
 Parser.Tree(c::CastOppening{G}) where G <: Group = Tree(c, ndigits(order(G), base=256))
 
 function Base.convert(::Type{CastOppening{G}}, tree::Tree) where G <: Group
-    β, history, commitment, oppening = convert(Tuple{BigInt, Vector{BigInt}, SignedVoteCommitment{G}, VoteOppening}, tree)
-    return CastOppening(β, history, commitment, oppening)
+    β, history, commitment, oppening, decoy = convert(Tuple{BigInt, Vector{BigInt}, SignedVoteCommitment{G}, VoteOppening, CoercedVote}, tree)
+    return CastOppening(β, history, commitment, oppening, decoy)
 end
 
 function Parser.Tree(v::Vote{G}) where G <: Group

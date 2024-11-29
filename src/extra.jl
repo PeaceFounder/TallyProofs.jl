@@ -37,3 +37,22 @@ function get_token(tally::Tally{G}, cast_proofs::Vector{G}, members::Vector{G}, 
 
     return tally.tokens[N]
 end
+
+function count_votes(tally::Tally)
+
+    counts = Dict{BigInt, Int}()
+    
+    for record in tally.tally
+        counts[record.selection] = get(counts, record.selection, 0) + 1
+    end
+    
+    for dummy in tally.dummy_votes
+        counts[dummy.selection] = get(counts, dummy.selection, 0) - 1
+    end
+
+    # Convert to array of tuples and sort by count (descending)
+    sorted_tuples = [(k, v) for (k, v) in counts if !iszero(v)]
+    sort!(sorted_tuples, by=x->x[2], rev=true)
+    
+    return sorted_tuples
+end

@@ -34,12 +34,11 @@ struct VoteOppening
     selection::BigInt #NTuple{N, BigInt}
 end
 
-function vote_oppening(selection::Integer, range::UnitRange{<:Integer}; roprg = gen_roprg()) 
+function vote_oppening(selection::Integer, range::UnitRange{<:Integer}; roprg = gen_roprg(), β = rand(roprg(:β), range)) 
 
     α = rand(roprg(:α), range)
     θ = rand(roprg(:θ), range)
     λ = rand(roprg(:λ), range)
-    β = rand(roprg(:β), range)
 
     return VoteOppening(α, θ, λ, β, selection)
 end
@@ -50,7 +49,12 @@ function vote_commitment(oppening::VoteOppening, setup::GeneratorSetup{<:Group})
     (; α, β, λ, θ, selection) = oppening
 
     Q = h^α * t^λ
-    C = h^β * d^θ * o^selection
+
+    if iszero(β)
+        C = iszero(selection) ? d^θ : d^θ * o^selection
+    else
+        C = iszero(selection) ? h^β * d^θ : h^β * d^θ * o^selection
+    end
 
     return VoteCommitment(Q, C)
 end
@@ -69,7 +73,7 @@ function commitment(record::VoteRecord{G}, s::BigInt, setup::GeneratorSetup{G}) 
     (; tracker, selection) = record
     (; h, o) = setup
 
-    C = h^s * tracker * o^selection
+    C = iszero(selection) ? h^s * tracker : h^s * tracker * o^selection
 
     return C
 end

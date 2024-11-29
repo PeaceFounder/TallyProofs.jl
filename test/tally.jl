@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOppening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_coercion_tracker!
+import TallyProofs: Proposal, CastOppening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, vote_oppening, create_decoy_credential!, CoercedVote, count_votes
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -47,7 +47,7 @@ function deliver_vote!(vote)
     
     cast_oppening = decrypt(vote.oppening, tallying_authorithy_key, proposal.encrypt_spec)
     push!(cast_oppenings, cast_oppening)
-    
+
     cast_index = length(cast_commitments)
     
     return alias, cast_index
@@ -59,7 +59,7 @@ function cast_vote!(voter, selection, chg, pin)
 
     tree = Tree(vote)
     @test Tree(convert(Vote{G}, tree)) == tree
-    #@show length(encode(tree))
+    @show length(encode(tree))
 
     @test check_challenge(vote, chg, voter.hasher) # "Challenge is not correct. The calculator may be corrupted."
     @test verify(vote, g) # "The signature is not valid" # g, hasher
@@ -68,7 +68,6 @@ function cast_vote!(voter, selection, chg, pin)
     
     return CastReceipt(alias, cast_index, chg)
 end
-
 
 pin = 4321 # The same pin code for all calculators
 
@@ -81,11 +80,19 @@ ted = VotingCalculator(proposal, verifier, ted_key, pin)
 
 alice_receipt = cast_vote!(alice, 3, 45534, pin)
 bob_receipt = cast_vote!(bob, 4, 34534, pin)
-eve_receipt = cast_vote!(eve, 7, 9992, pin)
-bob_receipt = cast_vote!(bob, 2, 3454, pin)
+eve_receipt = cast_vote!(eve, 6, 9992, pin)
+bob_receipt = cast_vote!(bob, 0, 3454, pin)
 ted_receipt = cast_vote!(ted, 4, 1245, pin)
 
-simulator = tally(proposal, cast_commitments, cast_oppenings, verifier; skip_list = [g^ted_key])
+fake_pin = 2341 # pin code that is shown to a coercer
+seed = create_decoy_credential!(eve, fake_pin, pin)
+
+eve_receipt = cast_vote!(eve, 5, 3415, fake_pin)
+eve_receipt = cast_vote!(eve, 11, 3415, fake_pin)
+
+# Now the authorithy creates a few dummy votes
+decoy_votes = [CoercedVote(8, 2:order(G) - 1), CoercedVote(9, 2:order(G) - 1)]
+simulator = tally(proposal, cast_commitments, cast_oppenings, verifier; skip_list = [g^ted_key], decoy_votes)
 @test verify(simulator)
 
 # now comes the verifications
@@ -108,19 +115,18 @@ N = findfirst(x -> x.tracker == ted_tracker, simulator.proposition.tally)
 # it would be better to have some determinism in the test also. I could evaluate probability
 
 # eve selects a vote with her prefered vote selection from the buletinboard
-N = findfirst(x -> x.selection == 2, simulator.proposition.tally)
+N = findfirst(x -> x.selection == 3, simulator.proposition.tally)
 fake_tracker = simulator.proposition.tally[N].tracker
 
-fake_pin = 2341 # pin code that is shown to a coercer
-install_coercion_tracker!(eve, fake_tracker, fake_pin, pin)
+install_decoy_tracker!(eve, fake_tracker, fake_pin)
 
 # Now the eve can check that it's vote is valid one
 
 eve_token = get_token(simulator.proposition, cast_proofs, members, eve_receipt, hasher)
 
-@test eve.last_token_trigger[] == nothing
+@test eve.trigger_token[] == nothing
 fake_eve_tracker = compute_tracker(eve, eve_token, fake_pin)
-@test eve.last_token_trigger[] == eve_token
+@test eve.trigger_token[] == eve_token
 
 @test fake_eve_tracker == fake_tracker
 
@@ -129,7 +135,10 @@ real_eve_tracker = compute_tracker(eve, eve_token, pin)
 
 # pin codes must be indistinguishable to coercer hence:
 second_fake_pin = 4566 
-install_coercion_tracker!(eve, fake_tracker, second_fake_pin, fake_pin) 
+
+seed2 = create_decoy_credential!(eve, second_fake_pin, pin)
+install_decoy_tracker!(eve, fake_tracker, second_fake_pin)
+#install_coercion_tracker!(eve, fake_tracker, second_fake_pin, fake_pin) 
 
 second_eve_tracker = compute_tracker(eve, eve_token, second_fake_pin)
 @test second_eve_tracker == fake_tracker
@@ -142,7 +151,7 @@ reversed_eve_token = ~eve_token & ((1 << nbits) - 1)
 fake_eve_tracker = compute_tracker(eve, reversed_eve_token, fake_pin)
 real_eve_tracker = compute_tracker(eve, reversed_eve_token, pin)
 
-@test fake_eve_tracker == real_eve_tracker
+@test fake_eve_tracker != real_eve_tracker
 
 # Testing probability for a coercer to guess the tracker
 
@@ -157,7 +166,7 @@ let
 
         compute_tracker(eve, trial_token, fake_pin; reset_trigger_token = true) # trigger_token
         
-        if eve.last_token_trigger[] == trial_token
+        if eve.trigger_token[] == trial_token
             hits += 1
         end
     end
@@ -165,9 +174,18 @@ let
     @test hits <= 64
 end
 
+println("\nTracked Votes:\n")
 
 for i in simulator.proposition.tally
     (; tracker, selection) = i
     short_tracker = div(tracker, 10^12)
     println("$(lpad(short_tracker, 9)) : $selection")
 end
+
+println("\nTally Count:\n")
+
+for (key, count) in count_votes(simulator.proposition)
+    println("$(lpad(key, 4)) : $count")
+end
+
+
