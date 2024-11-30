@@ -3,8 +3,7 @@ using TallyProofs
 using CryptoGroups
 using SigmaProofs
 using SigmaProofs.Verificatum: generator_basis
-import TallyProofs: ReCommit, SupersessionCalculator, check_challenge, supersess, verify
-
+import TallyProofs: ReCommit, SupersessionCalculator, check_challenge, supersess, verify, trim
 
 G = @ECGroup{P_192}
 g = G()
@@ -18,7 +17,6 @@ C_vec = G[]
 A_vec = G[]
 
 recommits = ReCommit{G}[]
-
 
 function recommit!(calc, chg)
 
@@ -36,8 +34,8 @@ h_vec = generator_basis(verifier, G, 4)
 h = h_vec[1]
 u₁, u₂, u₃ = h_vec[2:end] # The generators are generated verifiably random with each individual seed
 
-alice = SupersessionCalculator(h, u₁, verifier)
-bob = SupersessionCalculator(h, u₂, verifier)
+alice = SupersessionCalculator(h, u₁, verifier; history_width=2) # everyone with different width
+bob = SupersessionCalculator(h, u₂, verifier; history_width=1)
 eve = SupersessionCalculator(h, u₃, verifier)
 
 recommit!(alice, 123)
@@ -50,7 +48,7 @@ recommit!(bob, 4551)
 alice_first = recommits[1]
 alice_last = recommits[5]
 
-@test alice_first.ux == alice_last.ux ^ prod(alice_last.history)
+@test alice_first.ux == alice_last.ux ^ prod(trim(alice_last.history))
 
 simulator = supersess(C_vec, h, recommits, verifier)
 @test verify(simulator)

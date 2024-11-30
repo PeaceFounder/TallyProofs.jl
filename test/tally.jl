@@ -20,7 +20,7 @@ ted_key = 56
 tallying_authorithy_key = 453
 
 # Buletin Board
-#proposal = Proposal(g, g^tallying_authorithy_key, verifier; encrypt_spec=TallyProofs.PlaintextMode()) 
+#proposal = Proposal(g, g^tallying_authorithy_key, verifier; encrypt_spec=TallyProofs.PlaintextMode(), token_max=999) 
 proposal = Proposal(g, g^tallying_authorithy_key, verifier; token_max=999)
 @test Tree(convert(Proposal{G}, Tree(proposal))) == Tree(proposal)
 
@@ -59,7 +59,7 @@ function cast_vote!(voter, selection, chg, pin)
 
     tree = Tree(vote)
     @test Tree(convert(Vote{G}, tree)) == tree
-    @show length(encode(tree))
+    #@show length(encode(tree))
 
     @test check_challenge(vote, chg, voter.hasher) # "Challenge is not correct. The calculator may be corrupted."
     @test verify(vote, g) # "The signature is not valid" # g, hasher
@@ -73,9 +73,9 @@ pin = 4321 # The same pin code for all calculators
 
 # verifier and the pin code would be inherited as well as the key, 
 # whereas proposal defines the instance!
-alice = VotingCalculator(proposal, verifier, alice_key, pin) 
-bob = VotingCalculator(proposal, verifier, bob_key, pin)
-eve = VotingCalculator(proposal, verifier, eve_key, pin)
+alice = VotingCalculator(proposal, verifier, alice_key, pin; history_width = 2) 
+bob = VotingCalculator(proposal, verifier, bob_key, pin; history_width = 2)
+eve = VotingCalculator(proposal, verifier, eve_key, pin; history_width = 2)
 ted = VotingCalculator(proposal, verifier, ted_key, pin)
 
 alice_receipt = cast_vote!(alice, 3, 45534, pin)
@@ -109,18 +109,13 @@ ted_tracker = compute_tracker(ted, ted_token, pin) # this is a hash of the track
 N = findfirst(x -> x.tracker == ted_tracker, simulator.proposition.tally)
 @test isnothing(N)
 
-# Setting up eve to show fake tracker
+coercion_tracker = compute_tracker(proposal, seed, simulator.proposition.coercion_token)
+N = findfirst(x -> x.tracker == coercion_tracker, simulator.proposition.tally)
+@test !isnothing(N)
+@test simulator.proposition.tally[N].selection == 11
 
-# demonstrate also that the wrong token does not work here
-# it would be better to have some determinism in the test also. I could evaluate probability
-
-# eve selects a vote with her prefered vote selection from the buletinboard
-N = findfirst(x -> x.selection == 3, simulator.proposition.tally)
-fake_tracker = simulator.proposition.tally[N].tracker
-
-install_decoy_tracker!(eve, fake_tracker, fake_pin)
-
-# Now the eve can check that it's vote is valid one
+# eve installs decoy tracker before the tokens are anounced
+install_decoy_tracker!(eve, coercion_tracker, fake_pin)
 
 eve_token = get_token(simulator.proposition, cast_proofs, members, eve_receipt, hasher)
 
@@ -128,7 +123,7 @@ eve_token = get_token(simulator.proposition, cast_proofs, members, eve_receipt, 
 fake_eve_tracker = compute_tracker(eve, eve_token, fake_pin)
 @test eve.trigger_token[] == eve_token
 
-@test fake_eve_tracker == fake_tracker
+@test fake_eve_tracker == coercion_tracker
 
 real_eve_tracker = compute_tracker(eve, eve_token, pin)
 @test fake_eve_tracker != real_eve_tracker
@@ -137,11 +132,10 @@ real_eve_tracker = compute_tracker(eve, eve_token, pin)
 second_fake_pin = 4566 
 
 seed2 = create_decoy_credential!(eve, second_fake_pin, pin)
-install_decoy_tracker!(eve, fake_tracker, second_fake_pin)
-#install_coercion_tracker!(eve, fake_tracker, second_fake_pin, fake_pin) 
+install_decoy_tracker!(eve, coercion_tracker, second_fake_pin)
 
 second_eve_tracker = compute_tracker(eve, eve_token, second_fake_pin)
-@test second_eve_tracker == fake_tracker
+@test second_eve_tracker == coercion_tracker
 
 # computing untriggered token
 
@@ -187,5 +181,3 @@ println("\nTally Count:\n")
 for (key, count) in count_votes(simulator.proposition)
     println("$(lpad(key, 4)) : $count")
 end
-
-

@@ -9,6 +9,13 @@ using CryptoPRG: HashSpec
 using CryptoPRG.Verificatum: PRG
 import SigmaProofs: prove, verify, proof_type
 
+
+function trim(arr)
+    last_nonzero = findlast(!iszero, arr)
+    isnothing(last_nonzero) && return @view arr[1:0]
+    return @view arr[1:last_nonzero]
+end
+
 struct ReCommit{G <: Group}
     β::BigInt
     u::G
@@ -20,19 +27,20 @@ end
 mutable struct SupersessionCalculator{G <: Group}
     const h::G # blinding generator
     const u::G
+    const width::Int
     history::Vector{BigInt} # qs, this needs to be carried over
     x::BigInt # The current value
     ux::G # also the current value
     verifier::Verifier
     prghash::HashSpec
 
-    function SupersessionCalculator(h::G, u::G, verifier::Verifier, prghash::HashSpec; roprg = gen_roprg()) where G <: Group
+    function SupersessionCalculator(h::G, u::G, verifier::Verifier, prghash::HashSpec; roprg = gen_roprg(), history_width::Int = 5) where G <: Group
         x = rand(roprg(:x), 2:order(G)-1)
-        new{G}(h, u, BigInt[], x, u^x, verifier, prghash)
+        new{G}(h, u, history_width, zeros(BigInt, history_width), x, u^x, verifier, prghash)
     end
 end
 
-SupersessionCalculator(h::G, u::G, verifier::ProtocolSpec) where G <: Group = SupersessionCalculator(h, u, verifier, verifier.prghash)
+SupersessionCalculator(h::G, u::G, verifier::ProtocolSpec; roprg = gen_roprg(), history_width::Int = 5) where G <: Group = SupersessionCalculator(h, u, verifier, verifier.prghash; roprg, history_width)
 
 function compute_p(A::G, chg::Integer, spec::HashSpec) where G <: Group
 
@@ -68,8 +76,14 @@ function recommit!(calc::SupersessionCalculator{G}, chg::Integer; roprg = gen_ro
     C = h^β * ux
     
     pok = prove(LogKnowledge(u, ux), verifier, x′)
-    
-    push!(calc.history, q)
+
+    N = iszero(calc.history[1]) ? 0 : findlast(!iszero, calc.history)
+    L = rand(roprg(:L), 1:calc.width)
+
+    append!(calc.history, (0 for i in (length(calc.history) + 1):(N + L)))
+
+    calc.history[N + 1] = q
+
     calc.x = x′
     calc.ux = ux
     
@@ -187,7 +201,7 @@ end
 function extract_supersession(recommits::Vector{ReCommit{G}}) where G <: Group
 
     u_vec = [r.u for r in recommits]
-    width_vec = [length(r.history) for r in recommits]
+    width_vec = [length(trim(r.history)) for r in recommits]
     
     return extract_maximum_mask(u_vec, width_vec)
 end
@@ -203,7 +217,7 @@ function reduce_representation(recommits::Vector{ReCommit{G}}, u_vec::Vector{G},
         if r.ux == ux_vec[ψi]
             α::BigInt = 1
         else
-            m = length(r.history)
+            m = length(trim(r.history))
             α = mod(prod(history[ψi][m+1:end]), order(G)) # 
         end
 
@@ -240,7 +254,7 @@ function supersess(C::Vector{G}, h::G, recommits::Vector{ReCommit{G}}, verifier:
     perm = sortperm(proposition.u)
     permute!(proposition, perm)
 
-    history = [r.history for r in @view(recommits[mask])]
+    history = [copy(trim(r.history)) for r in @view(recommits[mask])]
     permute!(history, perm)
 
     ψ, α = reduce_representation(recommits, proposition.u, proposition.ux, history)

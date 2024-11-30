@@ -115,7 +115,9 @@ function compute_tracker(proposal::Proposal, seed::Vector{UInt8}, token::Integer
     θ, λ = compute_tracker_preimage(proposal, seed)
     (; d, t) = proposal.basis
 
-    return d^θ * t^(λ * token)
+    T =  d^θ * t^(λ * token)
+
+    return proposal.hasher(octet(T))[1:8] |> octet2int
 end
 
 function CoercedVote(proposal::Proposal{G}, selection::Integer, seed::Vector{UInt8}) where G <: Group
@@ -128,7 +130,6 @@ struct VotingCalculator{G} # More preciselly it would be VotingCalculatorInstanc
 
     verifier::Verifier
     hasher::HashSpec # We shall also take it from the verifier
-                  #setup::GeneratorSetup # we shall generate it from the Verifier. The blinding generator shall also be reused
 
     supersession::SupersessionCalculator{G}
 
@@ -141,8 +142,6 @@ struct VotingCalculator{G} # More preciselly it would be VotingCalculatorInstanc
     pin::Int # Pin code for authetification
     θ::BigInt
     λ::BigInt
-    T_d::G 
-    T_t::G # resutling tracker is Hash(T_d * T_t^e)
 
     current_selection::Ref{BigInt}
     trigger_token::Ref{Union{Int, Nothing}}
@@ -151,7 +150,7 @@ struct VotingCalculator{G} # More preciselly it would be VotingCalculatorInstanc
     decoys::Vector{DecoyCredential}
 end
 
-function VotingCalculator(proposal::Proposal{G}, verifier::Verifier, key::Integer, pin::Int; roprg = gen_roprg()) where G <: Group
+function VotingCalculator(proposal::Proposal{G}, verifier::Verifier, key::Integer, pin::Int; roprg = gen_roprg(), history_width::Int = 5) where G <: Group
     
     hasher = verifier.prghash # the verifier could implement hasher method
 
@@ -161,17 +160,14 @@ function VotingCalculator(proposal::Proposal{G}, verifier::Verifier, key::Intege
     pseudonym = g^key
 
     u = map2generator(pseudonym, hasher)
-    sup_calc = SupersessionCalculator(h, u, verifier)
+    sup_calc = SupersessionCalculator(h, u, verifier; history_width, roprg)
 
     challenge = rand(UInt8, 32) # I could use roprg here perhaps
 
     θ = rand(roprg(:θ), 2:order(G) - 1)
     λ = rand(roprg(:λ), 2:order(G) - 1)
 
-    T_d = d^θ
-    T_t = t^λ
-    
-    return VotingCalculator(proposal, verifier, hasher, sup_calc, challenge, pseudonym, key |> BigInt, pin, θ, λ, T_d, T_t, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
+    return VotingCalculator(proposal, verifier, hasher, sup_calc, challenge, pseudonym, key |> BigInt, pin, θ, λ, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
 end
 
 # Installs override tracker for VotingCalculator for override_pin code. Leaves verification to verifier_pin
@@ -186,7 +182,6 @@ function install_decoy_tracker!(calc::VotingCalculator, tracker::BigInt, authori
     end
 end
 
-# retruns seed
 # in case it fails it is possible to repeat the process
 function create_decoy_credential!(calc::VotingCalculator, fake_pin::Int, authorizing_pin::Int; roprg = gen_roprg())
     
@@ -196,6 +191,8 @@ function create_decoy_credential!(calc::VotingCalculator, fake_pin::Int, authori
         credential = DecoyCredential(fake_pin, seed)
 
         push!(calc.decoys, credential)
+
+        return seed
     else
         error("Incorrect pin code")
     end
@@ -211,7 +208,6 @@ function tracker_challenge(ux::G, chg::Vector{UInt8}, token::Integer, hasher::Ha
     return rand(prg, 2:order(G)-1)
 end
 
-
 function verify_watermark(proposal::Proposal{G}, ux::G, token::Integer, hasher::HashSpec) where G <: Group
     
     (; token_max, watermark_nbits) = proposal
@@ -224,6 +220,7 @@ end
 function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; reset_trigger_token::Bool = false)
 
     (; hasher) = voter
+    (; d, t) = voter.proposal.basis
 
     if (isnothing(voter.trigger_token[]) || reset_trigger_token) && verify_watermark(voter.proposal, voter.supersession.ux, token, hasher)
         voter.trigger_token[] = token
@@ -231,9 +228,8 @@ function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; rese
 
     # The computation is always present in spite if it is even to be superseeded by the mask
     if voter.pin == pin
-        (; T_d, T_t) = voter
+        (; θ, λ) = voter
         challenge = tracker_challenge(voter.supersession.ux, voter.challenge, token, voter.hasher)
-        T = T_d * T_t^challenge
     else
 
         N = findlast(x -> x.pin == pin, voter.decoys)
@@ -242,10 +238,14 @@ function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; rese
             error("Incoreect PIN code")
         else
             (; seed) = voter.decoys[N]
-            T = compute_tracker(voter.proposal, seed, token)
+            #T = compute_tracker_element(voter.proposal, seed, token)
+            θ, λ = compute_tracker_preimage(voter.proposal, seed)
+            challenge = token
         end
 
     end
+
+    T = d^θ * t^(λ * challenge)
 
     M = findlast(x -> x.pin == pin, voter.override_mask)
 
@@ -440,7 +440,7 @@ end
 function extract_supersession(cast_oppenings::Vector{<:CastOppening})
 
     pseudonyms = [i.commitment.signature.pbkey for i in cast_oppenings]
-    width = [length(i.history) for i in cast_oppenings]
+    width = [length(trim(i.history)) for i in cast_oppenings]
     
     mask = extract_maximum_mask(pseudonyms, width)
 
@@ -523,7 +523,7 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector
     ux = [i.ux for i in proposition.vote_commitments]
     pok = [i.pok for i in proposition.vote_commitments]
 
-    history = [i.history for i in @view(cast_oppenings[mask])]
+    history = [copy(trim(i.history)) for i in @view(cast_oppenings[mask])]
 
     ψ, α = reduce_representation(cast_oppenings, u, ux, history, hasher)
     β = [i.β for i in cast_oppenings]
@@ -564,7 +564,7 @@ end
 
 function extract_coerced_votes(cast_oppenings)
 
-    indicies = unique(eachindex(reverse(cast_oppenings))) do i
+    indicies = unique(reverse(eachindex(cast_oppenings))) do i
         
         (; θ, λ) = cast_oppenings[i].decoy
         pseudonym = cast_oppenings[i].commitment.signature.pbkey
