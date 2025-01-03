@@ -44,7 +44,11 @@ function apply_watermark!(token::BitVector, key::Vector{UInt8}, hasher::HashSpec
     prg = PRG(hasher, key)
     positions = sort(randperm(prg, length(token); m = num_positions))
 
-    encoded_bits = octet2bits(hasher(key))[1:num_positions]
+    for (i, pos) in enumerate(positions)
+        token[pos] = 0
+    end
+
+    encoded_bits = octet2bits(hasher([key; bits2octet(token)]))[1:num_positions]
     
     for (i, pos) in enumerate(positions)
         token[pos] = encoded_bits[i]
@@ -72,19 +76,20 @@ end
 Verify if token contains correct HMAC bits at key-determined positions.
 """
 function verify_watermark(token::BitVector, key::Vector{UInt8}, hasher::HashSpec; num_positions::Integer=4)
-    
+
     # Generate same deterministic bit positions
     prg = PRG(hasher, key)
     positions = sort(randperm(prg, length(token); m = num_positions))
 
-    expected_bits = octet2bits(hasher(key))[1:num_positions]
-    
-    # Extract actual bits from token
+    bare_token = copy(token)
     actual_bits = BitVector(undef, num_positions)
     for (i, pos) in enumerate(positions)
         actual_bits[i] = token[pos]
+        bare_token[pos] = 0
     end
-    
+
+    expected_bits = octet2bits(hasher([key; bits2octet(bare_token)]))[1:num_positions]
+
     # Compare expected and actual bits
     return actual_bits == expected_bits
 end

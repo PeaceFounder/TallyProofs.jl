@@ -168,7 +168,7 @@ let
     @test hits <= 64
 end
 
-println("\nTracked Votes:\n")
+println("\nTally Board:\n")
 
 for i in simulator.proposition.tally
     (; tracker, selection) = i
