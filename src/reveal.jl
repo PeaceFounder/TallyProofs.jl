@@ -6,12 +6,12 @@ import SigmaProofs: prove, verify, proof_type
 
 struct GeneratorSetup{G <: Group}
     h::G # blinding generator
-    d::G # tracker blinding generator
-    t::G # tracker generator
+    d::G # tracker generator
+#    t::G # tracker generator
     o::G
 end
 
-Base.:(==)(x::T, y::T) where T <: GeneratorSetup = x.h == y.h && x.d == y.d && x.t == y.t && x.o == y.o
+Base.:(==)(x::T, y::T) where T <: GeneratorSetup = x.h == y.h && x.d == y.d && x.o == y.o
 
 struct VoteCommitment{G <: Group}
     Q::G # tracker commitment
@@ -45,12 +45,13 @@ end
 
 function vote_commitment(oppening::VoteOppening, setup::GeneratorSetup{<:Group})
 
-    (; h, d, t, o) = setup
+    (; h, d, o) = setup
     (; α, β, λ, θ, selection) = oppening
 
-    Q = h^α * t^λ
+    #Q = h^α * t^λ
+    Q = h^α * d^λ
 
-    if iszero(β)
+    if iszero(β) # why blinding factor can be zero?
         C = iszero(selection) ? d^θ : d^θ * o^selection
     else
         C = iszero(selection) ? h^β * d^θ : h^β * d^θ * o^selection
@@ -63,17 +64,18 @@ function isbinding(commitment::VoteCommitment{G}, oppening::VoteOppening, setup:
     return commitment == vote_commitment(oppening, setup)
 end
 
-struct VoteRecord{G <: Group}
-    tracker::G
+struct VoteRecord
+    #tracker::G
+    tracker::BigInt
     selection::BigInt
 end
 
-function commitment(record::VoteRecord{G}, s::BigInt, setup::GeneratorSetup{G}) where {G <: Group}
+function commitment(record::VoteRecord, s::BigInt, setup::GeneratorSetup{G}) where {G <: Group}
 
     (; tracker, selection) = record
-    (; h, o) = setup
+    (; h, d, o) = setup
 
-    C = iszero(selection) ? h^s * tracker : h^s * tracker * o^selection
+    C = iszero(selection) ? h^s * d^tracker : h^s * d^tracker * o^selection
 
     return C
 end
@@ -82,7 +84,7 @@ struct RevealShuffle{G <: Group} <: Proposition
     setup::GeneratorSetup{G}
     tracker_challenges::Vector{BigInt}
     vote_commitments::Vector{VoteCommitment{G}} 
-    tally::Vector{VoteRecord{G}} 
+    tally::Vector{VoteRecord} 
 end
 
 Base.length(proposition::RevealShuffle) = length(proposition.vote_commitments)
@@ -92,26 +94,27 @@ Base.permute!(proposition::RevealShuffle, ψ::Vector{Int}) = permute!(propositio
 struct RevealShuffleProof{G <: Group} <: Proof
     shuffle::PoSProof{G, 1}
     s::Vector{BigInt}
-    trackers::Vector{PedersenProof{G}}
+    #trackers::Vector{PedersenProof{G}}
 end
 
 proof_type(::Type{RevealShuffle{G}}) where {G <: Group} = RevealShuffleProof{G}
 
-function tracker(vote_oppening::VoteOppening, chg::BigInt, setup::GeneratorSetup)
+function tracker(θ::Integer, λ::Integer, chg::Integer, order::Integer)
+    t = θ + λ * chg
+    return mod(t, order)
+end
 
-    (; d, t) = setup
+function tracker(vote_oppening::VoteOppening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
     (; θ, λ) = vote_oppening
-
-    T = d^θ * t^(λ * chg)
-
-    return T
+    return tracker(θ, λ, chg, order)
 end
 
 function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_oppenings::Vector{<:VoteOppening}) where {G <: Group}
     
-    (; d, t, o) = setup
+    #(; d, o) = setup
 
-    tally = VoteRecord{G}[VoteRecord(tracker(oppening, chg, setup), oppening.selection) for (chg, oppening) in zip(tracker_challenges, vote_oppenings)]
+    #tally = VoteRecord{G}[VoteRecord(tracker(oppening, chg, setup), oppening.selection) for (chg, oppening) in zip(tracker_challenges, vote_oppenings)]
+    tally = VoteRecord[VoteRecord(tracker(oppening, chg, order(setup.d)), oppening.selection) for (chg, oppening) in zip(tracker_challenges, vote_oppenings)]
 
     return RevealShuffle(setup, tracker_challenges, vote_commitments, tally)
 end
@@ -131,7 +134,7 @@ end
 function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_oppenings::AbstractVector{<:VoteOppening}, 𝛙::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
 
     (; setup, tally, tracker_challenges, vote_commitments) = proposition
-    (; h, d, t) = proposition.setup
+    (; h, d) = proposition.setup
 
     𝐫′ = rand(roprg(:𝐫′), 2:order(G)-1, length(vote_commitments))
 
@@ -151,20 +154,22 @@ function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_oppenings
 
     shuffle_proof = prove(shuffle_proposition, verifier, 𝐫′, 𝛙; roprg)
 
-    trackers = (i.tracker for i in tally)
+    #trackers = (i.tracker for i in tally)
     
-    θ = (i.θ for i in @view(vote_oppenings[𝛙]))
-    λ = (i.λ for i in @view(vote_oppenings[𝛙]))
+    #θ = (i.θ for i in @view(vote_oppenings[𝛙]))
+    #λ = (i.λ for i in @view(vote_oppenings[𝛙]))
 
-    tracker_proofs = [prove(PedersenCommitment(d, t, Ti), verifier, λi * ei, θi; roprg = gen_roprg(roprg("$Ti"))) for (Ti, ei, λi, θi) in zip(trackers, @view(tracker_challenges[𝛙]), λ, θ)]
+    #tracker_proofs = [prove(PedersenCommitment(d, t, Ti), verifier, λi * ei, θi; roprg = gen_roprg(roprg("$Ti"))) for (Ti, ei, λi, θi) in zip(trackers, @view(tracker_challenges[𝛙]), λ, θ)]
 
-    return RevealShuffleProof(shuffle_proof, s, tracker_proofs)
+    #return RevealShuffleProof(shuffle_proof, s, tracker_proofs)
+    #return RevealShuffleProof(shuffle_proof, s, tracker_proofs)
+    return RevealShuffleProof(shuffle_proof, s)
 end
 
 function verify(proposition::RevealShuffle{G}, proof::RevealShuffleProof{G}, verifier::Verifier) where G <: Group
 
     (; setup, tally, tracker_challenges, vote_commitments) = proposition
-    (; h, d, t) = proposition.setup
+    (; h, d) = proposition.setup
 
     C_vec = (commitment(com, chg) for (com, chg) in zip(vote_commitments, tracker_challenges))
     𝐞 = [ElGamalRow(Ci, Ci) for Ci in C_vec]
@@ -176,13 +181,13 @@ function verify(proposition::RevealShuffle{G}, proof::RevealShuffleProof{G}, ver
 
     verify(shuffle_proposition, proof.shuffle, verifier) || return false
 
-    trackers = (i.tracker for i in tally)
+    #trackers = (i.tracker for i in tally)
 
-    for (Ti, pok) in zip(trackers, proof.trackers)
+    # for (Ti, pok) in zip(trackers, proof.trackers)
 
-        verify(PedersenCommitment(d, t, Ti), pok, verifier) || return false
+    #     verify(PedersenCommitment(d, t, Ti), pok, verifier) || return false
 
-    end
+    # end
 
     return true
 end

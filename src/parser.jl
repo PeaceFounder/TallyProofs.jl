@@ -16,11 +16,11 @@ function Base.convert(::Type{SchnorrProof{G}}, tree::Tree) where G <: Group
     return SchnorrProof(R, s)
 end
 
-Parser.Tree(setup::GeneratorSetup{G}) where G <: Group = Tree((setup.h, setup.d, setup.t, setup.o))
+Parser.Tree(setup::GeneratorSetup{G}) where G <: Group = Tree((setup.h, setup.d, setup.o))
 
 function Base.convert(::Type{GeneratorSetup{G}}, tree::Tree) where G <: Group
-    h, d, t, o = convert(Tuple{G, G, G, G}, tree)
-    return GeneratorSetup(h, d, t, o)
+    h, d, o = convert(Tuple{G, G, G}, tree)
+    return GeneratorSetup(h, d, o)
 end
 
 Parser.Tree(commitment::VoteCommitment) = Tree((commitment.Q, commitment.C))

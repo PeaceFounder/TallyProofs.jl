@@ -11,9 +11,9 @@ g = G()
 
 verifier = SigmaProofs.Verificatum.ProtocolSpec(; g)
 
-h, d, t, o = generator_basis(verifier, G, 4)
+h, d, o = generator_basis(verifier, G, 3)
 
-setup = GeneratorSetup(h, d, t, o)
+setup = GeneratorSetup(h, d, o)
 
 # Now I need to make vote_oppenings and vote_commitments
 
@@ -43,6 +43,7 @@ simulator = reveal(setup, tracker_challenges, commitments, oppenings, verifier)
 @test verify(simulator)
 
 # voter verifies their tracker
-alice_tracker = tracker(alice, tracker_challenges[1], setup)
+#alice_tracker = tracker(alice, tracker_challenges[1], setup)
+alice_tracker = tracker(alice, tracker_challenges[1], order(setup.d))
 N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally)
 @test simulator.proposition.tally[N].selection == 2

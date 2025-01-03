@@ -86,8 +86,8 @@ end
 
 function Proposal(g::G, collector::G, verifier::Verifier; spec = UInt8[], watermark_nbits::Int=4, token_max::Int=9999_9999, encrypt_spec::EncryptSpec=AES256_SHA256(), hasher = verifier.prghash) where G <: Group
 
-    h, d, t, o = generator_basis(verifier, G, 4)
-    basis = GeneratorSetup(h, d, t, o)
+    h, d, o = generator_basis(verifier, G, 3)
+    basis = GeneratorSetup(h, d, o)
     
     return Proposal(spec, g, collector, basis, watermark_nbits, token_max, encrypt_spec, hasher)
 end
@@ -113,11 +113,13 @@ end
 function compute_tracker(proposal::Proposal, seed::Vector{UInt8}, token::Integer)
 
     θ, λ = compute_tracker_preimage(proposal, seed)
-    (; d, t) = proposal.basis
+    #(; d, t) = proposal.basis
 
-    T =  d^θ * t^(λ * token)
+    T = tracker(θ, λ, token, order(proposal.g))
+    #T =  d^θ * t^(λ * token)
+    #T =  mod(θ + λ * token, order(proposal.g))
 
-    return proposal.hasher(octet(T))[1:8] |> octet2int
+    return proposal.hasher(int2octet(T))[1:8] |> octet2int
 end
 
 function CoercedVote(proposal::Proposal{G}, selection::Integer, seed::Vector{UInt8}) where G <: Group
@@ -155,7 +157,7 @@ function VotingCalculator(proposal::Proposal{G}, verifier::Verifier, key::Intege
     hasher = verifier.prghash # the verifier could implement hasher method
 
     (; g) = proposal
-    (; h, d, t) = proposal.basis
+    (; h, d) = proposal.basis
 
     pseudonym = g^key
 
@@ -220,7 +222,7 @@ end
 function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; reset_trigger_token::Bool = false)
 
     (; hasher) = voter
-    (; d, t) = voter.proposal.basis
+    (; d) = voter.proposal.basis
 
     if (isnothing(voter.trigger_token[]) || reset_trigger_token) && verify_watermark(voter.proposal, voter.supersession.ux, token, hasher)
         voter.trigger_token[] = token
@@ -245,14 +247,17 @@ function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; rese
 
     end
 
-    T = d^θ * t^(λ * challenge)
+    #T = d^θ * t^(λ * challenge)
+    #T = d^θ * t^(λ * challenge)
+    #T = θ + λ * challenge
+    T = tracker(θ, λ, challenge, order(voter.proposal.g))
 
     M = findlast(x -> x.pin == pin, voter.override_mask)
 
     if voter.trigger_token[] == token && !isnothing(M)
         return voter.override_mask[M].tracker 
     else
-        return hasher(octet(T))[1:8] |> octet2int
+        return hasher(int2octet(T))[1:8] |> octet2int
     end
 end
 
@@ -375,12 +380,13 @@ end
 
 function dummy_vote(oppening::VoteOppening, setup::GeneratorSetup{<:Group})
 
-    (; h, t) = setup
+    (; h, d) = setup
     (; α, θ, λ, selection, β) = oppening
 
     @check β == 0 "vote must be unblinded"
     
-    Q = h^α * t^λ
+    #Q = h^α * t^λ
+    Q = h^α * d^λ
     
     return DummyVote(Q, θ, selection)
 end
@@ -404,8 +410,8 @@ function vote_commitment(vote::DummyVote{G}, setup::GeneratorSetup{G}) where G <
     return VoteCommitment(Q, C)
 end
 
-struct TallyRecord{G <: Group}
-    T::G
+struct TallyRecord
+    T::BigInt # the source
     tracker::BigInt
     selection::BigInt
 end
@@ -416,9 +422,9 @@ struct Tally{G <: Group} <: Proposition
     vote_commitments::Vector{SignedVoteCommitment{G}}
     skip_list::Vector{G} # In case voter had cast a vote with other means
     dummy_votes::Vector{DummyVote{G}}
-    coercion_token::BigInt
-    tokens::Vector{<:Integer}
-    tally::Vector{TallyRecord{G}}
+    coercion_token::BigInt # decoy_tracker_challenge
+    tokens::Vector{<:Integer} # tracker_challenges
+    tally::Vector{TallyRecord} # tally_board 
 end
 
 struct TallyProof{G <: Group} <: Proof
@@ -492,9 +498,11 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_oppenings::
     vote_oppenings = (i.oppening for i in @view(public_cast_oppenings[skip_mask])) # added here
     total_vote_oppenings = Iterators.flatten((vote_oppenings, dummy_votes))
 
-    trackers = (tracker(oppening, chg, proposal.basis) for (chg, oppening) in zip(total_tracker_challenges, total_vote_oppenings))
+    #trackers = (tracker(oppening, chg, proposal.basis) for (chg, oppening) in zip(total_tracker_challenges, total_vote_oppenings))
+    trackers = (tracker(oppening, chg, order(proposal.g)) for (chg, oppening) in zip(total_tracker_challenges, total_vote_oppenings))
 
-    tally = TallyRecord{G}[TallyRecord(Ti, octet2int(hasher(octet(Ti))[1:8]), oppening.selection) for (Ti, oppening) in zip(trackers, total_vote_oppenings)]
+    #tally = TallyRecord{G}[TallyRecord(Ti, octet2int(hasher(octet(Ti))[1:8]), oppening.selection) for (Ti, oppening) in zip(trackers, total_vote_oppenings)]
+    tally = TallyRecord[TallyRecord(Ti, octet2int(hasher(int2octet(Ti))[1:8]), oppening.selection) for (Ti, oppening) in zip(trackers, total_vote_oppenings)]
 
     vote_commitments = [i.commitment for i in public_cast_oppenings]
 
@@ -553,7 +561,7 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector
 
     for (i, (v, oppening)) in enumerate(zip(proposition.dummy_votes, dummy_votes)) 
 
-        pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.t, v.Q)
+        pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.d, v.Q)
         pedersen_proof = prove(pedersen_commitment, verifier, oppening.λ, oppening.α; roprg = gen_roprg(roprg("dummy_tracker_$i")))
 
         dummy_tracker_proofs[i] = pedersen_proof
@@ -605,8 +613,8 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     
     hasher = verifier.prghash
 
-    (; h, d, t, o) = proposition.proposal.basis
-    proposition.proposal.basis == GeneratorSetup(h, d, t, o) || return false
+    (; h, d, o) = proposition.proposal.basis
+    proposition.proposal.basis == GeneratorSetup(h, d, o) || return false
     
     (; token_max, watermark_nbits) = proposition.proposal
     (; vote_commitments, cast_commitments) = proposition
@@ -645,7 +653,7 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     verify(reveal_proposition, proof.reveal, verifier) || return false
 
     for (Qi, proofi) in zip(Q, proof.dummy_trackers)
-        pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.t, Qi)
+        pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.d, Qi)
         verify(pedersen_commitment, proofi, verifier) || return false
     end
     
