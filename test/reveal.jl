@@ -23,7 +23,8 @@ oppenings = VoteOppening[] # secret
 function cast_vote!(selection)
 
     oppening = vote_oppening(selection, 2:order(G) - 1)
-    commitment = vote_commitment(oppening, setup)
+    #commitment = vote_commitment(oppening, setup)
+    commitment = VoteCommitment(oppening, setup)
 
     push!(oppenings, oppening)    
     push!(commitments, commitment)

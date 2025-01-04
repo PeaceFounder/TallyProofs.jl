@@ -23,18 +23,21 @@ function Base.convert(::Type{GeneratorSetup{G}}, tree::Tree) where G <: Group
     return GeneratorSetup(h, d, o)
 end
 
-Parser.Tree(commitment::VoteCommitment) = Tree((commitment.Q, commitment.C))
+Parser.Tree(commitment::VoteCommitment) = Tree((commitment.Q, commitment.R, commitment.V))
 
 function Base.convert(::Type{VoteCommitment{G}}, tree::Tree) where G <: Group
-    Q, C = convert(Tuple{G, G}, tree)
-    return VoteCommitment(Q, C)
+    Q, R, V = convert(Tuple{G, G, G}, tree)
+    return VoteCommitment(Q, R, V)
 end
 
-Parser.Tree(oppening::VoteOppening, L::Int) = Tree((Leaf(oppening.α, L), Leaf(oppening.θ, L), Leaf(oppening.λ, L), Leaf(oppening.β, L), Leaf(oppening.selection, L))) # Need to enforce padding here
+#Parser.Tree(oppening::VoteOppening, L::Int) = Tree((Leaf(oppening.α, L), Leaf(oppening.θ, L), Leaf(oppening.λ, L), Leaf(oppening.β, L), Leaf(oppening.selection, L))) # Need to enforce padding here
+
+Parser.Tree(oppening::VoteOppening, L::Int) = Tree((Leaf(oppening.α, L), Leaf(oppening.λ, L), Leaf(oppening.β, L), Leaf(oppening.θ, L), Leaf(oppening.γ, L), Leaf(oppening.selection, L)))
 
 function Base.convert(::Type{VoteOppening}, tree::Tree)
-    α, θ, λ, β, selection = convert(Tuple{BigInt, BigInt, BigInt, BigInt, BigInt}, tree)
-    return VoteOppening(α, θ, λ, β, selection)
+    #α, θ, λ, β, selection = convert(Tuple{BigInt, BigInt, BigInt, BigInt, BigInt}, tree)
+    α, λ, β, θ, γ, selection = convert(Tuple{BigInt, BigInt, BigInt, BigInt, BigInt, BigInt}, tree)
+    return VoteOppening(α, λ, β, θ, γ, selection)
 end
 
 Parser.Tree(signature::Signature) = Tree((signature.pbkey, signature.proof))

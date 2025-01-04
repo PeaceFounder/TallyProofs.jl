@@ -65,9 +65,14 @@ function VoteOppening(vote::CoercedVote, range::UnitRange; roprg = gen_roprg())
 
     (; θ, λ, selection) = vote
     α = rand(roprg(:α), range)
+    #β = rand(roprg(:β), range)
+
     β = 0
 
-    return VoteOppening(α, θ, λ, β, selection)
+    γ = 0
+
+    #return VoteOppening(α, θ, λ, β, selection)
+    return VoteOppening(α, λ, β, θ, γ, selection)
 end
 
 
@@ -347,9 +352,12 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
 
     _α = rand(roprg(:α), 2:order(G) - 1)
     _β = rand(roprg(:β), 2:order(G) - 1)
+    _γ = rand(roprg(:γ), 2:order(G) - 1)
     
-    oppening = VoteOppening(_α, voter.θ, voter.λ, _β, encoded_selection)
-    commitment = vote_commitment(oppening, voter.proposal.basis)
+    #oppening = VoteOppening(_α, voter.θ, voter.λ, _β, encoded_selection)
+    oppening = VoteOppening(_α, voter.λ, _β, voter.θ, _γ, encoded_selection)
+    #commitment = vote_commitment(oppening, voter.proposal.basis)
+    commitment = VoteCommitment(oppening, voter.proposal.basis)
 
     buffer = zeros(UInt8, 16)
     int2octet!(buffer, chg |> BigInt) # TODO: CryptoGroups bug!!!
@@ -381,14 +389,14 @@ end
 function dummy_vote(oppening::VoteOppening, setup::GeneratorSetup{<:Group})
 
     (; h, d) = setup
-    (; α, θ, λ, selection, β) = oppening
+    (; α, θ, λ, selection, β, γ) = oppening
 
-    @check β == 0 "vote must be unblinded"
+    @check γ == 0 "vote must be unblinded"
     
     #Q = h^α * t^λ
     Q = h^α * d^λ
     
-    return DummyVote(Q, θ, selection)
+    return DummyVote(Q, θ, selection) # Needs to have also R
 end
 
 function commitment(vote::DummyVote{G}, d::G, o::G, e::BigInt) where G <: Group
@@ -405,9 +413,13 @@ function vote_commitment(vote::DummyVote{G}, setup::GeneratorSetup{G}) where G <
     (; d, o, h) = setup
     (; Q, θ, selection) = vote
 
-    C = d^θ * o^selection
+    #C = d^θ * o^selection
+    
+    R = d^θ # This is a hack
 
-    return VoteCommitment(Q, C)
+    V = o^selection
+    
+    return VoteCommitment(Q, R, V)
 end
 
 struct TallyRecord
@@ -546,7 +558,8 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector
     total_tracker_challenges = collect(BigInt, Iterators.flatten((tracker_challenges, coercion_tracker_challenges)))
     
     vote_commitments = (i.commitment for i in @view(proposition.vote_commitments[skip_mask]))
-    dummy_vote_commitments = (vote_commitment(i, proposition.proposal.basis) for i in dummy_votes)
+    #dummy_vote_commitments = (vote_commitment(i, proposition.proposal.basis) for i in dummy_votes)
+    dummy_vote_commitments = (VoteCommitment(i, proposition.proposal.basis) for i in dummy_votes)
     total_vote_commitments = collect(VoteCommitment{G}, Iterators.flatten((vote_commitments, dummy_vote_commitments)))
     
     reveal_proposition = RevealShuffle(proposition.proposal.basis, total_tracker_challenges, total_vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
@@ -652,10 +665,10 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
 
     verify(reveal_proposition, proof.reveal, verifier) || return false
 
-    for (Qi, proofi) in zip(Q, proof.dummy_trackers)
-        pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.d, Qi)
-        verify(pedersen_commitment, proofi, verifier) || return false
-    end
+    # for (Qi, proofi) in zip(Q, proof.dummy_trackers)
+    #     pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.d, Qi)
+    #     verify(pedersen_commitment, proofi, verifier) || return false
+    # end
     
     return true
 end
