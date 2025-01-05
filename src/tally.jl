@@ -68,11 +68,13 @@ function VoteOppening(vote::CoercedVote, range::UnitRange; roprg = gen_roprg())
     #β = rand(roprg(:β), range)
 
     β = 0
-
     γ = 0
 
     #return VoteOppening(α, θ, λ, β, selection)
-    return VoteOppening(α, λ, β, θ, γ, selection)
+    #return VoteOppening(α, λ, β, θ, γ, selection)
+
+    tracker = TrackerOppening(α, λ, β, θ)
+    return VoteOppening(tracker, selection, γ)
 end
 
 
@@ -147,8 +149,9 @@ struct VotingCalculator{G} # More preciselly it would be VotingCalculatorInstanc
 
     # We shall keep the tracker constant for simplicity
     pin::Int # Pin code for authetification
-    θ::BigInt
-    λ::BigInt
+    tracker::TrackerOppening
+#    θ::BigInt
+#    λ::BigInt
 
     current_selection::Ref{BigInt}
     trigger_token::Ref{Union{Int, Nothing}}
@@ -171,10 +174,11 @@ function VotingCalculator(proposal::Proposal{G}, verifier::Verifier, key::Intege
 
     challenge = rand(UInt8, 32) # I could use roprg here perhaps
 
-    θ = rand(roprg(:θ), 2:order(G) - 1)
-    λ = rand(roprg(:λ), 2:order(G) - 1)
+    tracker = TrackerOppening(2:order(G)-1; roprg)
+    #θ = rand(roprg(:θ), 2:order(G) - 1)
+    #λ = rand(roprg(:λ), 2:order(G) - 1)
 
-    return VotingCalculator(proposal, verifier, hasher, sup_calc, challenge, pseudonym, key |> BigInt, pin, θ, λ, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
+    return VotingCalculator(proposal, verifier, hasher, sup_calc, challenge, pseudonym, key |> BigInt, pin, tracker, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
 end
 
 # Installs override tracker for VotingCalculator for override_pin code. Leaves verification to verifier_pin
@@ -235,7 +239,7 @@ function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; rese
 
     # The computation is always present in spite if it is even to be superseeded by the mask
     if voter.pin == pin
-        (; θ, λ) = voter
+        (; θ, λ) = voter.tracker
         challenge = tracker_challenge(voter.supersession.ux, voter.challenge, token, voter.hasher)
     else
 
@@ -252,9 +256,6 @@ function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; rese
 
     end
 
-    #T = d^θ * t^(λ * challenge)
-    #T = d^θ * t^(λ * challenge)
-    #T = θ + λ * challenge
     T = tracker(θ, λ, challenge, order(voter.proposal.g))
 
     M = findlast(x -> x.pin == pin, voter.override_mask)
@@ -350,14 +351,8 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
     C, A, sup_oppening = TallyProofs.recommit!(voter.supersession, chg; roprg = gen_roprg(roprg(:supersession))) 
     (; β, history, ux, pok) = sup_oppening
 
-    _α = rand(roprg(:α), 2:order(G) - 1)
-    _β = rand(roprg(:β), 2:order(G) - 1)
-    _γ = rand(roprg(:γ), 2:order(G) - 1)
-    
-    #oppening = VoteOppening(_α, voter.θ, voter.λ, _β, encoded_selection)
-    oppening = VoteOppening(_α, voter.λ, _β, voter.θ, _γ, encoded_selection)
-    #commitment = vote_commitment(oppening, voter.proposal.basis)
-    commitment = VoteCommitment(oppening, voter.proposal.basis)
+    vote_oppening = VoteOppening(voter.tracker, encoded_selection, 2:order(G)-1; roprg)
+    vote_commitment = commitment(vote_oppening, voter.proposal.basis)
 
     buffer = zeros(UInt8, 16)
     int2octet!(buffer, chg |> BigInt) # TODO: CryptoGroups bug!!!
@@ -369,9 +364,9 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
 
     proposal_hash = voter.hasher(encode(Tree(voter.proposal)))
 
-    signed_vote_commitment = SignedVoteCommitment(proposal_hash, commitment, ux, pok, blinded_challenge, signer)
+    signed_vote_commitment = SignedVoteCommitment(proposal_hash, vote_commitment, ux, pok, blinded_challenge, signer)
 
-    cast_oppening = CastOppening(β, history, signed_vote_commitment, oppening, coerced_vote)
+    cast_oppening = CastOppening(β, history, signed_vote_commitment, vote_oppening, coerced_vote)
 
     cast_oppening_enc = encrypt(cast_oppening, voter.proposal.g, voter.proposal.collector, voter.proposal.encrypt_spec)
 
@@ -389,8 +384,10 @@ end
 function dummy_vote(oppening::VoteOppening, setup::GeneratorSetup{<:Group})
 
     (; h, d) = setup
-    (; α, θ, λ, selection, β, γ) = oppening
-
+    #(; α, θ, λ, selection, β, γ) = oppening
+    (; tracker, selection, γ) = oppening
+    (; α, λ, θ) = tracker
+    
     @check γ == 0 "vote must be unblinded"
     
     #Q = h^α * t^λ
@@ -441,7 +438,7 @@ end
 
 struct TallyProof{G <: Group} <: Proof
     supersession::SupersessionProof{G}
-    dummy_trackers::Vector{PedersenProof{G}}
+    #dummy_trackers::Vector{PedersenProof{G}}
     reveal::RevealShuffleProof{G}
 end
 
@@ -559,7 +556,8 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector
     
     vote_commitments = (i.commitment for i in @view(proposition.vote_commitments[skip_mask]))
     #dummy_vote_commitments = (vote_commitment(i, proposition.proposal.basis) for i in dummy_votes)
-    dummy_vote_commitments = (VoteCommitment(i, proposition.proposal.basis) for i in dummy_votes)
+    #dummy_vote_commitments = (VoteCommitment(i, proposition.proposal.basis) for i in dummy_votes)
+    dummy_vote_commitments = (commitment(i, proposition.proposal.basis) for i in dummy_votes)
     total_vote_commitments = collect(VoteCommitment{G}, Iterators.flatten((vote_commitments, dummy_vote_commitments)))
     
     reveal_proposition = RevealShuffle(proposition.proposal.basis, total_tracker_challenges, total_vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
@@ -570,17 +568,18 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_oppenings::Vector
 
     reveal_proof = prove(reveal_proposition, verifier, total_vote_oppenings, 𝛙_reveal; roprg = gen_roprg(roprg(:reveal)))    
 
-    dummy_tracker_proofs = Vector{PedersenProof{G}}(undef, length(dummy_votes))
+    # dummy_tracker_proofs = Vector{PedersenProof{G}}(undef, length(dummy_votes))
 
-    for (i, (v, oppening)) in enumerate(zip(proposition.dummy_votes, dummy_votes)) 
+    # for (i, (v, oppening)) in enumerate(zip(proposition.dummy_votes, dummy_votes)) 
 
-        pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.d, v.Q)
-        pedersen_proof = prove(pedersen_commitment, verifier, oppening.λ, oppening.α; roprg = gen_roprg(roprg("dummy_tracker_$i")))
+    #     pedersen_commitment = PedersenCommitment(proposition.proposal.basis.h, proposition.proposal.basis.d, v.Q)
+    #     pedersen_proof = prove(pedersen_commitment, verifier, oppening.tracker.λ, oppening.tracker.α; roprg = gen_roprg(roprg("dummy_tracker_$i")))
 
-        dummy_tracker_proofs[i] = pedersen_proof
-    end
+    #     dummy_tracker_proofs[i] = pedersen_proof
+    # end
 
-    return TallyProof(supersession_proof, dummy_tracker_proofs, reveal_proof)
+    #return TallyProof(supersession_proof, dummy_tracker_proofs, reveal_proof)
+    return TallyProof(supersession_proof, reveal_proof)
 end
 
 function extract_coerced_votes(cast_oppenings)

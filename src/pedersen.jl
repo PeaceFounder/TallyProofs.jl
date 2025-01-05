@@ -79,8 +79,6 @@ struct LambdaCommitment{G<:Group} <: Proposition
     Q::G
 end
 
-#LambdaCommitment(h::G, d::G, λ::BigInt) = 
-
 struct LambdaProof{G<:Group} <: Proof
     A::G
     w::BigInt
@@ -131,8 +129,6 @@ function prove(proposition::LambdaCommitment{G}, verifier::Verifier, λ::Integer
     z = mod((e₂ - ν) * invλ, order(G))
 
     return LambdaProof(A, w, z)
-    #@show verify(proposition, proof, verifier)
-    #return proof
 end
 
 function verify(proposition::LambdaCommitment{G}, proof::LambdaProof{G}, verifier::Verifier) where G <: Group

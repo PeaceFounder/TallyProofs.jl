@@ -4,7 +4,7 @@ using CryptoGroups
 using SigmaProofs
 using SigmaProofs.Verificatum: generator_basis
 using CryptoPRG.Verificatum: PRG
-import TallyProofs: GeneratorSetup, vote_oppening, vote_commitment, reveal, verify, tracker, VoteCommitment, VoteOppening
+import TallyProofs: GeneratorSetup, commitment, reveal, verify, tracker, VoteCommitment, VoteOppening, TrackerOppening
 
 G = @ECGroup{P_192}
 g = G()
@@ -22,14 +22,15 @@ oppenings = VoteOppening[] # secret
 
 function cast_vote!(selection)
 
-    oppening = vote_oppening(selection, 2:order(G) - 1)
-    #commitment = vote_commitment(oppening, setup)
-    commitment = VoteCommitment(oppening, setup)
+    tracker_oppening = TrackerOppening(2:order(G) - 1)
+    vote_oppening = VoteOppening(tracker_oppening, selection, 2:order(G) - 1)
 
-    push!(oppenings, oppening)    
-    push!(commitments, commitment)
+    vote_commitment = commitment(vote_oppening, setup)
 
-    return oppening
+    push!(oppenings, vote_oppening)    
+    push!(commitments, vote_commitment)
+
+    return vote_oppening
 end
 
 alice = cast_vote!(2)
@@ -44,7 +45,6 @@ simulator = reveal(setup, tracker_challenges, commitments, oppenings, verifier)
 @test verify(simulator)
 
 # voter verifies their tracker
-#alice_tracker = tracker(alice, tracker_challenges[1], setup)
 alice_tracker = tracker(alice, tracker_challenges[1], order(setup.d))
 N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally)
 @test simulator.proposition.tally[N].selection == 2

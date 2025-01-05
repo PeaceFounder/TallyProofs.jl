@@ -7,7 +7,6 @@ import SigmaProofs: prove, verify, proof_type
 struct GeneratorSetup{G <: Group}
     h::G # blinding generator
     d::G # tracker generator
-#    t::G # tracker generator
     o::G
 end
 
@@ -36,80 +35,64 @@ struct TrackerOppening
     θ::BigInt # blinding factor for the generator
 end
 
-struct VoteOppening # order changed
-    # Q
-    α::BigInt # blinding factors for tracker
-    λ::BigInt
-
-    # R
-    β::BigInt # blinding factor for vote and tracker blinding factor
-    θ::BigInt # blinding factor for the generator
-    
-    # V
-    γ::BigInt
-    selection::BigInt #NTuple{N, BigInt}
-end
-
-# Why is β a keyword paremeter here
-function vote_oppening(selection::Integer, range::UnitRange{<:Integer}; roprg = gen_roprg(), β = rand(roprg(:β), range)) 
+function TrackerOppening(range::UnitRange{<:Integer}; roprg = gen_roprg())
 
     α = rand(roprg(:α), range)
     λ = rand(roprg(:λ), range)
 
+    β = rand(roprg(:β), range)
     θ = rand(roprg(:θ), range)
 
-    γ = rand(roprg(:γ), range)
-
-    #return VoteOppening(α, θ, λ, β, selection)
-    return VoteOppening(α, λ, β, θ, γ, selection)
+    return TrackerOppening(α, λ, β, θ)
 end
 
-#function vote_commitment(oppening::VoteOppening, setup::GeneratorSetup{<:Group})
 
-function VoteCommitment(oppening::VoteOppening, setup::GeneratorSetup{G}) where G <: Group
+struct VoteOppening # order changed
+    tracker::TrackerOppening
+    selection::BigInt #NTuple{N, BigInt}
+    γ::BigInt
+end
 
-    (; h, d, o) = setup
-    #(; α, β, λ, θ, selection) = oppening
-    (; α, β, γ, λ, θ, selection) = oppening
+function VoteOppening(tracker::TrackerOppening, selection::Integer, range::UnitRange{<:Integer}; roprg = gen_roprg()) 
+    γ = rand(roprg(:β), range)
+    return VoteOppening(tracker, selection, γ)
+end
 
-    #Q = h^α * t^λ
-    Q = h^α * d^λ
+function commitment(oppening::TrackerOppening, setup::GeneratorSetup{G}) where G <: Group
 
+    (; h, d) = setup
+    (; α, β, λ, θ) = oppening
     
-    #R = h^β * d^θ
+    Q = h^α * d^λ
     R = iszero(β) ? d^θ : h^β * d^θ # A temporary fix
+
+    return (Q, R)
+end
+
+function commitment(oppening::VoteOppening, setup::GeneratorSetup{G}) where G <: Group 
+    
+    (; h, o) = setup
+    (; γ, selection) = oppening
+
+    Q, R = commitment(oppening.tracker, setup)
 
     if iszero(γ) 
         V = iszero(selection) ? one(G) : o^selection
     else
         V = iszero(selection) ? h^γ : h^γ * o^selection
     end
-
+    
     return VoteCommitment(Q, R, V)
 end
 
-function isbinding(commitment::VoteCommitment{G}, oppening::VoteOppening, setup::GeneratorSetup{G}) where {G <: Group}
-    return commitment == vote_commitment(oppening, setup)
+function isbinding(C::VoteCommitment{G}, oppening::VoteOppening, setup::GeneratorSetup{G}) where {G <: Group}
+    return C == commitment(oppening, setup)
 end
 
 struct VoteRecord
-    #tracker::G
     tracker::BigInt
     selection::BigInt
 end
-
-# function commitment(record::VoteRecord, s::BigInt, setup::GeneratorSetup{G}) where {G <: Group}
-
-#     (; tracker, selection) = record
-#     (; h, d, o) = setup
-
-#     C = iszero(selection) ? h^s * d^tracker : h^s * d^tracker * o^selection
-
-#     return C
-# end
-
-
-# I will need tracker_commitment and vote_commitment
 
 function tracker_commitment(record::VoteRecord, setup::GeneratorSetup{G}) where G <: Group
 
@@ -121,7 +104,6 @@ function tracker_commitment(record::VoteRecord, setup::GeneratorSetup{G}) where 
     return T
 end
 
-
 function vote_commitment(record::VoteRecord, setup::GeneratorSetup{G}) where {G <: Group} 
 
     (; tracker, selection) = record
@@ -131,19 +113,6 @@ function vote_commitment(record::VoteRecord, setup::GeneratorSetup{G}) where {G 
 
     return V
 end
-
-
-# function commitment(record::VoteRecord, setup::GeneratorSetup{G}) where {G <: Group} 
-
-#     (; tracker, selection) = record
-#     (; d, o) = setup
-
-#     C = iszero(selection) ? d^tracker : d^tracker * o^selection
-
-#     return C
-# end
-
-
 
 struct RevealShuffle{G <: Group} <: Proposition
     setup::GeneratorSetup{G}
@@ -158,7 +127,6 @@ Base.permute!(proposition::RevealShuffle, ψ::Vector{Int}) = permute!(propositio
 
 struct RevealShuffleProof{G <: Group} <: Proof
     shuffle::PoSProof{G, 2} # I will need to upgrade this to 2
-    #s::Vector{BigInt}
     trackers::Vector{LambdaProof{G}}
 end
 
@@ -169,16 +137,17 @@ function tracker(θ::Integer, λ::Integer, chg::Integer, order::Integer)
     return mod(t, order)
 end
 
-function tracker(vote_oppening::VoteOppening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
-    (; θ, λ) = vote_oppening
+function tracker(tracker_oppening::TrackerOppening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
+    (; θ, λ) = tracker_oppening
     return tracker(θ, λ, chg, order)
+end
+
+function tracker(vote_oppening::VoteOppening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
+    return tracker(vote_oppening.tracker, chg, order)
 end
 
 function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_oppenings::Vector{<:VoteOppening}) where {G <: Group}
     
-    #(; d, o) = setup
-
-    #tally = VoteRecord{G}[VoteRecord(tracker(oppening, chg, setup), oppening.selection) for (chg, oppening) in zip(tracker_challenges, vote_oppenings)]
     tally = VoteRecord[VoteRecord(tracker(oppening, chg, order(setup.d)), oppening.selection) for (chg, oppening) in zip(tracker_challenges, vote_oppenings)]
 
     return RevealShuffle(setup, tracker_challenges, vote_commitments, tally)
@@ -201,52 +170,29 @@ function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_oppenings
     (; setup, tally, tracker_challenges, vote_commitments) = proposition
     (; h, d) = proposition.setup
 
-    #𝐫′ = rand(roprg(:𝐫′), 2:order(G)-1, length(vote_commitments))
-
-    # α = (i.α for i in vote_oppenings)
-    # β = (i.β for i in vote_oppenings)
-
-    #s = α .* tracker_challenges .+ β + 𝐫′
-    #permute!(s, 𝛙)
-
-    #𝐫′ = mod.( .- β .- α .* tracker_challenges, order(G))
-    #𝐫T = .- β .- α .* tracker_challenges
-    𝐫T = [- i.β - i.α * ei for (i, ei) in zip(vote_oppenings, tracker_challenges)]
+    𝐫T = [- i.tracker.β - i.tracker.α * ei for (i, ei) in zip(vote_oppenings, tracker_challenges)]
     𝐫V = [-i.γ for i in vote_oppenings]
-    
-    #𝐫′ = [𝐫T 𝐫V]
     𝐫′ = [𝐫T 𝐫V] # 
 
-    #C_vec = (commitment(com, chg) for (com, chg) in zip(vote_commitments, tracker_challenges))
     T_vec = (tracker_commitment(com, chg) for (com, chg) in zip(vote_commitments, tracker_challenges))
     V_vec = (vote_commitment(com) for com in vote_commitments)
     𝐞 = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T_vec, V_vec)]
 
-    #C′_vec = (commitment(votei, si, setup) for (votei, si) in zip(tally, s))
-    #C′_vec = (commitment(votei, setup) for votei in tally)
     T′_vec = (tracker_commitment(votei, setup) for votei in tally)
     V′_vec = (vote_commitment(votei, setup) for votei in tally)
     𝐞′ = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T′_vec, V′_vec)]
     
-
     shuffle_proposition = Shuffle(h, h, 𝐞, 𝐞′)
 
     shuffle_proof = prove(shuffle_proposition, verifier, 𝐫′, 𝛙; roprg)
 
-    #trackers = (i.tracker for i in tally)
-
     Q_vec = (i.Q for i in vote_commitments)
 
-    #θ = (i.θ for i in @view(vote_oppenings[𝛙]))
-    #λ = (i.λ for i in @view(vote_oppenings[𝛙]))
-
-    α = (i.α for i in vote_oppenings)
-    λ = (i.λ for i in vote_oppenings)
+    α = (i.tracker.α for i in vote_oppenings)
+    λ = (i.tracker.λ for i in vote_oppenings)
 
     lambda_proofs = [prove(LambdaCommitment(h, d, Qi), verifier, λi, αi; roprg = gen_roprg(roprg("$Qi"))) for (Qi, λi, αi) in zip(Q_vec, λ, α)]
     
-    
-    #return RevealShuffleProof(shuffle_proof, s, lambda_proofs)
     return RevealShuffleProof(shuffle_proof, lambda_proofs)
 end
 
@@ -259,14 +205,10 @@ function verify(proposition::RevealShuffle{G}, proof::RevealShuffleProof{G}, ver
     T_vec = (tracker_commitment(com, chg) for (com, chg) in zip(vote_commitments, tracker_challenges))
     V_vec = (vote_commitment(com) for com in vote_commitments)
     𝐞 = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T_vec, V_vec)]
-    #𝐞 = [ElGamalRow(Ti, Ti) for Ti in T_vec]
 
-    #C′_vec = (commitment(votei, si, setup) for (votei, si) in zip(tally, proof.s))
     T′_vec = (tracker_commitment(votei, setup) for votei in tally)
     V′_vec = (vote_commitment(votei, setup) for votei in tally)
     𝐞′ = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T′_vec, V′_vec)]
-
-    #𝐞′ = [ElGamalRow(Ti, Ti) for Ti in T′_vec]
 
     shuffle_proposition = Shuffle(h, h, 𝐞, 𝐞′)
 

@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOppening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, vote_oppening, create_decoy_credential!, CoercedVote, count_votes
+import TallyProofs: Proposal, CastOppening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, create_decoy_credential!, CoercedVote, count_votes
 
 import SigmaProofs.Parser: Tree, encode
 
