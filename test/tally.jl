@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOppening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, create_decoy_credential!, CoercedVote, count_votes
+import TallyProofs: Proposal, CastOppening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOppening, count_votes
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -27,7 +27,7 @@ proposal = Proposal(g, g^tallying_authorithy_key, verifier; token_max=999)
 members = sort([g^x for x in [alice_key, bob_key, eve_key, ted_key]]) # In practice the list is obtained in braiding 
 
 cast_commitments = G[]
-cast_proofs = G[]
+#cast_proofs = G[]
 
 # Secrets for tallying authorithy
 cast_oppenings = CastOppening{G}[]
@@ -43,7 +43,7 @@ function deliver_vote!(vote)
     # recommit and consistency with oppening should be also performed
 
     push!(cast_commitments, vote.C)
-    push!(cast_proofs, vote.A)
+    #push!(cast_proofs, vote.A)
     
     cast_oppening = decrypt(vote.oppening, tallying_authorithy_key, proposal.encrypt_spec)
     push!(cast_oppenings, cast_oppening)
@@ -55,28 +55,29 @@ end
 
 function cast_vote!(voter, selection, chg, pin)
    
-    vote = assemble_vote!(voter, selection, chg, pin; inherit_challenge=false)
+    envelope = assemble_vote!(voter, selection, chg, pin; inherit_challenge=false)
 
-    tree = Tree(vote)
+    tree = Tree(envelope.vote)
     @test Tree(convert(Vote{G}, tree)) == tree
     #@show length(encode(tree))
 
-    @test check_challenge(vote, chg, voter.hasher) # "Challenge is not correct. The calculator may be corrupted."
-    @test verify(vote, g) # "The signature is not valid" # g, hasher
+    @test check_challenge(envelope, chg, voter.hasher)
+    @test verify(envelope.vote, g) # "The signature is not valid" # g, hasher
 
-    alias, cast_index = deliver_vote!(vote)
+    alias, cast_index = deliver_vote!(envelope.vote)
+    # cast_index is kept by the voting device for locting cast commitment on the buletin board
     
-    return CastReceipt(alias, cast_index, chg)
+    return CastReceipt(alias, envelope.id, envelope.w)
 end
 
 pin = 4321 # The same pin code for all calculators
 
 # verifier and the pin code would be inherited as well as the key, 
 # whereas proposal defines the instance!
-alice = VotingCalculator(proposal, verifier, alice_key, pin; history_width = 2) 
-bob = VotingCalculator(proposal, verifier, bob_key, pin; history_width = 2)
-eve = VotingCalculator(proposal, verifier, eve_key, pin; history_width = 2)
-ted = VotingCalculator(proposal, verifier, ted_key, pin)
+alice = VotingCalculator(b"Alice", proposal, verifier, alice_key, pin; history_width = 2) 
+bob = VotingCalculator(b"Bob", proposal, verifier, bob_key, pin; history_width = 2)
+eve = VotingCalculator(b"Eve", proposal, verifier, eve_key, pin; history_width = 2)
+ted = VotingCalculator(b"Ted", proposal, verifier, ted_key, pin)
 
 alice_receipt = cast_vote!(alice, 3, 45534, pin)
 bob_receipt = cast_vote!(bob, 4, 34534, pin)
@@ -91,19 +92,21 @@ eve_receipt = cast_vote!(eve, 5, 3415, fake_pin)
 eve_receipt = cast_vote!(eve, 11, 3415, fake_pin)
 
 # Now the authorithy creates a few dummy votes
-decoy_votes = [CoercedVote(8, 2:order(G) - 1), CoercedVote(9, 2:order(G) - 1)]
+decoy_votes = [DecoyOppening(8, 2:order(G) - 1), DecoyOppening(9, 2:order(G) - 1)]
 simulator = tally(proposal, cast_commitments, cast_oppenings, verifier; skip_list = [g^ted_key], decoy_votes)
 @test verify(simulator)
 
 # now comes the verifications
 
-alice_token = get_token(simulator.proposition, cast_proofs, members, alice_receipt, hasher)
+#alice_token = get_token(simulator.proposition, cast_proofs, members, alice_receipt, hasher)
+alice_token = get_token(simulator.proposition, members, alice_receipt, hasher)
 alice_tracker = compute_tracker(alice, alice_token, pin) # this is a hash of the tracker
 
 N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally)
 @test simulator.proposition.tally[N].selection == 3
 
-ted_token = get_token(simulator.proposition, cast_proofs, members, ted_receipt, hasher)
+#ted_token = get_token(simulator.proposition, cast_proofs, members, ted_receipt, hasher)
+ted_token = get_token(simulator.proposition, members, ted_receipt, hasher)
 ted_tracker = compute_tracker(ted, ted_token, pin) # this is a hash of the tracker
 
 N = findfirst(x -> x.tracker == ted_tracker, simulator.proposition.tally)
@@ -117,7 +120,8 @@ N = findfirst(x -> x.tracker == coercion_tracker, simulator.proposition.tally)
 # eve installs decoy tracker before the tokens are anounced
 install_decoy_tracker!(eve, coercion_tracker, fake_pin)
 
-eve_token = get_token(simulator.proposition, cast_proofs, members, eve_receipt, hasher)
+#eve_token = get_token(simulator.proposition, cast_proofs, members, eve_receipt, hasher)
+eve_token = get_token(simulator.proposition, members, eve_receipt, hasher)
 
 @test eve.trigger_token[] == nothing
 fake_eve_tracker = compute_tracker(eve, eve_token, fake_pin)
