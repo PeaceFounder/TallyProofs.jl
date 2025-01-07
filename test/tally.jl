@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding
+import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -61,7 +61,7 @@ function cast_vote!(voter, selection, chg, pin)
     envelope = assemble_vote!(voter, selection, chg, pin; inherit_challenge=false)
 
     tree = Tree(envelope.vote)
-    @test Tree(convert(Vote{G}, tree)) == tree
+    @test Tree(convert(VoteEnvelope{G}, tree)) == tree
     #@show length(encode(tree))
 
     @test isconsistent(envelope, chg, g, voter.hasher, voter.verifier)

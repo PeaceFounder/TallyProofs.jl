@@ -23,7 +23,7 @@ include("kem.jl")
 
 include("supersession.jl")
 include("pedersen.jl")
-include("reveal.jl")
+include("shuffle.jl")
 include("tally.jl")
 include("extra.jl")
 include("parser.jl")

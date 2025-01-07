@@ -88,7 +88,7 @@ function Base.convert(::Type{CastOpening{G}}, tree::Tree) where G <: Group
     return CastOpening(β, history, record, opening, decoy, π_t)
 end
 
-function Parser.Tree(v::Vote{G}) where G <: Group
+function Parser.Tree(v::VoteEnvelope{G}) where G <: Group
     if isnothing(v.signature)
         return Tree((v.proposal, v.C, v.opening))
     else
@@ -96,7 +96,7 @@ function Parser.Tree(v::Vote{G}) where G <: Group
     end
 end
 
-function Base.convert(::Type{Vote{G}}, tree::Tree) where G <: Group
+function Base.convert(::Type{VoteEnvelope{G}}, tree::Tree) where G <: Group
     proposal_leaf, C, opening, signature = convert(Tuple{Leaf, G, Encryption{CastOpening{G}, G}, Signature{G}}, tree)
-    return Vote(proposal_leaf.x, C, opening, signature)
+    return VoteEnvelope(proposal_leaf.x, C, opening, signature)
 end

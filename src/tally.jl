@@ -314,6 +314,19 @@ function isconsistent(cast::CastOpening{G}, proposal::Proposal{G}, verifier::Ver
     return isconsistent(cast.record, proposal.g, proposal.hasher, verifier) 
 end
 
+function isconsistent(a::T, b::T) where T <: CastOpening
+
+    a.record.signature.pbkey == b.record.signature.pbkey || return false
+    a.record.commitment.Q == b.record.commitment.Q || return false
+    a.record.commitment.R == b.record.commitment.R || return false
+    a.record.I == b.record.I || return false
+
+    n = min(length(trim(a.history)), length(trim(b.history)))
+    @view(a.history[1:n]) == @view(b.history[1:n]) || return false
+
+    return true
+end
+
 function isbinding(C::G, opening::CastOpening, h::G) where G <: Group
 
     (; β) = opening
@@ -340,77 +353,41 @@ end
 
 sup_generator(cast::CastOpening, hasher::HashSpec) = sup_generator(cast.record, hasher)
 
-function isconsistent(a::T, b::T) where T <: CastOpening
 
-    a.commitment.signature.pbkey == b.commitment.signature.pbkey || return false
-    a.commitment.commitment.Q == b.commitment.commitment.Q || return false
-    a.commitment.commitment.R == b.commitment.commitment.R || return false
-    a.commitment.I == b.commitment.I || return false
 
-    n = min(length(a.history), length(b.history))
-    @view(a.history[1:n]) == @view(b.history[1:n]) || return false
-
-    return true
-end
-
-function isconsistent(a::AbstractVector{T}, b::T) where T <: CastOpening
-    
-    (; pbkey) = b.record.signature
-
-    if isempty(a)
-        n = nothing
-    else
-
-        n = nothing
-        y = 0
-
-        for i in 1:length(a)
-            if a[i].record.signature.pbkey == pbkey
-                l = length(trim(a[i].history))
-                y = y < l ? l : y
-            end
-        end
-    end
-
-    if isnothing(n)
-        return true
-    else
-        return isconsistent(a[n], b)
-    end
-end
-
-struct Vote{G}
+struct VoteEnvelope{G}
     proposal::Vector{UInt8}
     C::G
     opening::Encryption{CastOpening{G}, G}
     signature::Union{Signature{G}, Nothing}
 end
 
-function Vote(proposal::Vector{UInt8}, C::G, opening::Encryption{CastOpening{G}, G}, signer::Signer{G}) where G <: Group
+function VoteEnvelope(proposal::Vector{UInt8}, C::G, opening::Encryption{CastOpening{G}, G}, signer::Signer{G}) where G <: Group
 
-    unsigned_vote = Vote(proposal, C, opening, nothing)
+    unsigned_vote = VoteEnvelope(proposal, C, opening, nothing)
     signature = sign(encode(Tree(unsigned_vote)), signer.g, signer.key)
 
-    return Vote(proposal, C, opening, signature)
+    return VoteEnvelope(proposal, C, opening, signature)
 end
 
-function verify(vote::Vote{G}, g::G) where G <: Group
+function verify(vote::VoteEnvelope{G}, g::G) where G <: Group
 
     (; proposal, C, opening, signature) = vote
-    unsigned_vote = Vote(proposal, C, opening, nothing)
+    unsigned_vote = VoteEnvelope(proposal, C, opening, nothing)
 
     return verify(encode(Tree(unsigned_vote)), g, vote.signature)
 end
 
-struct VoteEnvelope{G} # auxilary data that enables delivery device to be sure that identity commitment will appear on the buletin board
-    vote::Vote{G}
+# auxilary data that enables delivery device to be sure that identity commitment will appear on the buletin board
+struct VoteContext{G} 
+    vote::VoteEnvelope{G}
     A::G 
     id::Vector{UInt8}
     w::G # 
     π_w::ChaumPedersenProof
 end
 
-function sup_generator(envelope::VoteEnvelope, hasher::HashSpec)
+function sup_generator(envelope::VoteContext, hasher::HashSpec)
 
     (; id, w) = envelope
     (; pbkey) = envelope.vote.signature
@@ -423,7 +400,7 @@ function sup_generator(envelope::VoteEnvelope, hasher::HashSpec)
 end
 
 # hasher could be derived from the verifier
-function isconsistent(envelope::VoteEnvelope, τ::Integer, g::G, hasher::HashSpec, verifier::Verifier) where G <: Group
+function isconsistent(envelope::VoteContext, τ::Integer, g::G, hasher::HashSpec, verifier::Verifier) where G <: Group
 
     (; C) = envelope.vote
     (; pbkey) = envelope.vote.signature
@@ -482,9 +459,9 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
 
     voter.current_selection[] = encoded_selection
 
-    vote = Vote(proposal_hash, C, cast_opening_enc, signer)
+    vote = VoteEnvelope(proposal_hash, C, cast_opening_enc, signer)
 
-    vote_envelope = VoteEnvelope(vote, A, id, w, π_w)
+    vote_envelope = VoteContext(vote, A, id, w, π_w)
 
     return vote_envelope
 end
@@ -589,8 +566,6 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::V
     skip_mask = BitVector(!(x in skip_list) for x in pseudonyms)
 
     public_dummy_votes = DecoyCommitment{G}[DecoyCommitment(i, proposal.basis) for i in dummy_votes]
-    Q = [i.Q for i in public_dummy_votes]
-
 
     Q_vec = [i.record.commitment.Q for i in public_cast_openings]
     R_vec = [i.record.commitment.R for i in public_cast_openings]
@@ -636,9 +611,25 @@ function reduce_representation(cast_openings::Vector{CastOpening{G}}, u::Vector{
     return reduce_representation(recommits, u, ux, history)
 end
 
-function prove(proposition::Tally{G}, verifier::Verifier, cast_openings::Vector{CastOpening{G}}, 𝛙_reveal::Vector{Int}; mask = extract_supersession(cast_openings), roprg = gen_roprg(), dummy_votes::Vector{VoteOpening} = VoteOpening[]) where G <: Group
+function validate(cast_openings::Vector{CastOpening{G}}, proposal::Proposal{G}, verifier::Verifier; mask = extract_supersession(cast_openings)) where G <: Group
+
+    for i in @view(cast_openings[mask])
+        @check isconsistent(i, proposal, verifier) "Consistency check have failed"
+        for j in cast_openings
+            if i.record.signature.pbkey == j.record.signature.pbkey
+                @check isconsistent(i, j) "Consistency check have failed"
+            end
+        end
+    end
+
+    return
+end
+
+function prove(proposition::Tally{G}, verifier::Verifier, cast_openings::Vector{CastOpening{G}}, 𝛙_reveal::Vector{Int}; mask = extract_supersession(cast_openings), roprg = gen_roprg(), dummy_votes::Vector{VoteOpening} = VoteOpening[], validate_openings::Bool = true) where G <: Group
 
     hasher = verifier.prghash
+
+    validate_openings && validate(cast_openings, proposition.proposal, verifier; mask)
 
     u = [sup_generator(i, hasher) for i in proposition.vote_commitments]
     ux = [i.ux for i in proposition.vote_commitments]

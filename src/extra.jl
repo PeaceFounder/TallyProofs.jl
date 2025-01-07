@@ -41,3 +41,35 @@ function count_votes(tally::Tally)
     
     return sorted_tuples
 end
+
+
+
+function isconsistent(a::AbstractVector{T}, b::T) where T <: CastOpening
+    
+    (; pbkey) = b.record.signature
+
+    if isempty(a)
+        n = nothing
+    else
+
+        n = nothing
+        y = 0
+
+        for i in 1:length(a)
+            if a[i].record.signature.pbkey == pbkey
+                l = length(trim(a[i].history))
+                y = y < l ? l : y
+            end
+        end
+    end
+
+    if isnothing(n)
+        return true
+    else
+        return isconsistent(a[n], b)
+    end
+end
+
+
+
+
