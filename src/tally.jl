@@ -253,7 +253,7 @@ function compute_tracker(voter::VotingCalculator, token::Integer, pin::Int; rese
     end
 end
 
-struct SignedVoteCommitment{G <: Group}
+struct CastRecord{G <: Group}
     proposal::Vector{UInt8} # hash
     ux::G
     commitment::VoteCommitment{G} # This one is derivable
@@ -262,15 +262,15 @@ struct SignedVoteCommitment{G <: Group}
     signature::Signature{G}
 end
 
-function SignedVoteCommitment(proposal::Vector{UInt8}, ux::G, commitment::VoteCommitment{G}, I::Vector{UInt8}, pok::SchnorrProof, signer::Signer{G}) where G <: Group
+function CastRecord(proposal::Vector{UInt8}, ux::G, commitment::VoteCommitment{G}, I::Vector{UInt8}, pok::SchnorrProof, signer::Signer{G}) where G <: Group
 
     msg = (proposal, ux, commitment)
     internal_signature = sign(encode(Tree(msg)), signer.g, signer.key)
 
-    return SignedVoteCommitment(proposal, ux, commitment, I, pok, internal_signature)
+    return CastRecord(proposal, ux, commitment, I, pok, internal_signature)
 end
 
-function verify(vote::SignedVoteCommitment{G}, g::G) where G <: Group
+function verify(vote::CastRecord{G}, g::G) where G <: Group
 
     (; proposal, commitment, ux) = vote
     msg = (proposal, ux, commitment)
@@ -278,7 +278,7 @@ function verify(vote::SignedVoteCommitment{G}, g::G) where G <: Group
     return verify(encode(Tree(msg)), g, vote.signature)
 end
 
-function isconsistent(row::SignedVoteCommitment{G}, g::G, hasher::HashSpec, verifier::Verifier) where G <: Group
+function isconsistent(row::CastRecord{G}, g::G, hasher::HashSpec, verifier::Verifier) where G <: Group
     
     verify(row, g) || return false
     (; ux, pok) = row
@@ -290,33 +290,34 @@ function isconsistent(row::SignedVoteCommitment{G}, g::G, hasher::HashSpec, veri
     return true
 end
 
+# Can be further encrypted in a threshold decryption ceremony if one wishes to have that for fairness
 struct CastOpening{G <: Group}
     β::BigInt # For supersession
     history::Vector{BigInt}
-    commitment::SignedVoteCommitment{G}
-    opening::VoteOpening # Can be further encrypted in a threshold decryption ceremony if one wishes to have that for fairness
+    record::CastRecord{G}
+    opening::VoteOpening # opening -> vote
     decoy::DecoyOpening
     π_t::SchnorrProof{G}
 end
 
 function isconsistent(cast::CastOpening{G}, proposal::Proposal{G}, verifier::Verifier) where G <: Group
 
-    commitment(cast.opening, proposal.basis) == cast.commitment.commitment || return false
+    commitment(cast.opening, proposal.basis) == cast.record.commitment || return false
 
     (; π_t) = cast
-    (; pbkey) = cast.commitment.signature
+    (; pbkey) = cast.record.signature
     (; g) = proposal
 
     verify(LogKnowledge(g, pbkey), π_t, verifier) || return false
     TrackerOpening(2:order(G)-1; roprg = gen_roprg(int2octet(π_t.s))) == cast.opening.tracker || return false
 
-    return isconsistent(cast.commitment, proposal.g, proposal.hasher, verifier) 
+    return isconsistent(cast.record, proposal.g, proposal.hasher, verifier) 
 end
 
 function isbinding(C::G, opening::CastOpening, h::G) where G <: Group
 
     (; β) = opening
-    (; ux) = opening.commitment
+    (; ux) = opening.record
     
     return C == h^β * ux
 end
@@ -329,7 +330,7 @@ function sup_generator(pseudonym::G, I::Vector{UInt8}, hasher::HashSpec) where G
     return u
 end
 
-function sup_generator(commitment::SignedVoteCommitment, hasher::HashSpec)
+function sup_generator(commitment::CastRecord, hasher::HashSpec)
 
     (; pbkey) = commitment.signature
     (; I) = commitment
@@ -337,7 +338,7 @@ function sup_generator(commitment::SignedVoteCommitment, hasher::HashSpec)
     return sup_generator(pbkey, I, hasher)    
 end
 
-sup_generator(cast::CastOpening, hasher::HashSpec) = sup_generator(cast.commitment, hasher)
+sup_generator(cast::CastOpening, hasher::HashSpec) = sup_generator(cast.record, hasher)
 
 function isconsistent(a::T, b::T) where T <: CastOpening
 
@@ -354,7 +355,7 @@ end
 
 function isconsistent(a::AbstractVector{T}, b::T) where T <: CastOpening
     
-    (; pbkey) = b.commitment.signature
+    (; pbkey) = b.record.signature
 
     if isempty(a)
         n = nothing
@@ -364,7 +365,7 @@ function isconsistent(a::AbstractVector{T}, b::T) where T <: CastOpening
         y = 0
 
         for i in 1:length(a)
-            if a[i].commitment.signature.pbkey == pbkey
+            if a[i].record.signature.pbkey == pbkey
                 l = length(trim(a[i].history))
                 y = y < l ? l : y
             end
@@ -473,7 +474,7 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
     (; hasher) = voter.proposal
     I = hasher([hasher(octet(w)); id])
 
-    signed_vote_commitment = SignedVoteCommitment(proposal_hash, ux, vote_commitment, I, pok, signer)
+    signed_vote_commitment = CastRecord(proposal_hash, ux, vote_commitment, I, pok, signer)
 
     cast_opening = CastOpening(β, history, signed_vote_commitment, vote_opening, coerced_vote, voter.π_t)
 
@@ -525,7 +526,7 @@ end
 struct Tally{G <: Group} <: Proposition
     proposal::Proposal
     cast_commitments::Vector{G}
-    vote_commitments::Vector{SignedVoteCommitment{G}}
+    vote_commitments::Vector{CastRecord{G}}
     skip_list::Vector{G} # In case voter had cast a vote with other means
     dummy_votes::Vector{DecoyCommitment{G}}
     coercion_token::BigInt # decoy_tracker_challenge
@@ -551,7 +552,7 @@ end
 
 function extract_supersession(cast_openings::Vector{<:CastOpening})
 
-    pseudonyms = [i.commitment.signature.pbkey for i in cast_openings]
+    pseudonyms = [i.record.signature.pbkey for i in cast_openings]
     width = [length(trim(i.history)) for i in cast_openings]
     
     mask = extract_maximum_mask(pseudonyms, width)
@@ -584,15 +585,15 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::V
 
     public_cast_openings = @view(cast_openings[mask])
     
-    pseudonyms = (i.commitment.signature.pbkey for i in public_cast_openings)
+    pseudonyms = (i.record.signature.pbkey for i in public_cast_openings)
     skip_mask = BitVector(!(x in skip_list) for x in pseudonyms)
 
     public_dummy_votes = DecoyCommitment{G}[DecoyCommitment(i, proposal.basis) for i in dummy_votes]
     Q = [i.Q for i in public_dummy_votes]
 
 
-    Q_vec = [i.commitment.commitment.Q for i in public_cast_openings]
-    R_vec = [i.commitment.commitment.R for i in public_cast_openings]
+    Q_vec = [i.record.commitment.Q for i in public_cast_openings]
+    R_vec = [i.record.commitment.R for i in public_cast_openings]
     
     seed = token_seed(Q_vec, R_vec, hasher)
     tokens = compute_tokens(seed, Q_vec, token_max, watermark_nbits, hasher)
@@ -615,7 +616,7 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::V
 
     tally = TallyRecord[TallyRecord(Ti, octet2int(hasher(int2octet(Ti))[1:8]), opening.selection) for (Ti, opening) in zip(trackers, total_vote_openings)]
 
-    vote_commitments = [i.commitment for i in public_cast_openings]
+    vote_commitments = [i.record for i in public_cast_openings]
 
     return Tally(proposal, cast_commitments, vote_commitments, skip_list, public_dummy_votes, coercion_token, tokens, tally)
 end
@@ -625,8 +626,8 @@ function reduce_representation(cast_openings::Vector{CastOpening{G}}, u::Vector{
     pseudonyms = (i.commitment.signature.pbkey for i in cast_openings)
 
     _u = (sup_generator(ci, hasher) for ci in cast_openings)
-    _ux = (i.commitment.ux for i in cast_openings) 
-    pok = (i.commitment.pok for i in cast_openings)
+    _ux = (i.record.ux for i in cast_openings) 
+    pok = (i.record.pok for i in cast_openings)
     _history = (i.history for i in cast_openings)
     β = (i.β for i in cast_openings)
 
@@ -677,7 +678,7 @@ function extract_decoy_votes(cast_openings)
     indicies = unique(reverse(eachindex(cast_openings))) do i
         
         (; θ, λ) = cast_openings[i].decoy
-        pseudonym = cast_openings[i].commitment.signature.pbkey
+        pseudonym = cast_openings[i].record.signature.pbkey
 
         return (octet(pseudonym), θ, λ) # need to add hash for CryptoGroups
     end
@@ -696,7 +697,7 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::V
     hasher = verifier.prghash
 
     filter_mask = extract_supersession(cast_openings)
-    commit_perm = sortperm(@view(cast_openings[filter_mask]); by = x -> x.commitment.signature.pbkey)
+    commit_perm = sortperm(@view(cast_openings[filter_mask]); by = x -> x.record.signature.pbkey)
     
     mask = findall(filter_mask)[commit_perm]
 

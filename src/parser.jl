@@ -60,7 +60,7 @@ function Base.convert(::Type{Proposal{G}}, tree::Tree) where G <: Group
      return Proposal(spec_leaf.x, g, collector, basis, watermark_nbits, token_max, EncryptSpec(Symbol(encrypt_spec)), HashSpec(hash_spec))
 end
 
-function Parser.Tree(c::SignedVoteCommitment)
+function Parser.Tree(c::CastRecord)
     if isnothing(c.signature)
         return Tree((c.proposal, c.ux, c.commitment, c.I, c.pok))
     else
@@ -68,9 +68,9 @@ function Parser.Tree(c::SignedVoteCommitment)
     end
 end
 
-function Base.convert(::Type{SignedVoteCommitment{G}}, tree::Tree) where G <: Group
+function Base.convert(::Type{CastRecord{G}}, tree::Tree) where G <: Group
     proposal_leaf, ux, commitment, I_leaf, pok, signature = convert(Tuple{Leaf, G, VoteCommitment{G}, Leaf, SchnorrProof{G}, Signature{G}}, tree)
-    return SignedVoteCommitment(proposal_leaf.x, ux, commitment, I_leaf.x, pok, signature)
+    return CastRecord(proposal_leaf.x, ux, commitment, I_leaf.x, pok, signature)
 end
 
 Parser.Tree(decoy::DecoyOpening, L::Int) = Tree((Leaf(decoy.θ, L), Leaf(decoy.λ, L), Leaf(decoy.selection, L)))
@@ -80,12 +80,12 @@ function Base.convert(::Type{DecoyOpening}, tree::Tree)
     return DecoyOpening(θ, λ, selection)
 end
 
-Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.commitment, Tree(c.opening, L), Tree(c.decoy, L), c.π_t))
+Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.record, Tree(c.opening, L), Tree(c.decoy, L), c.π_t))
 Parser.Tree(c::CastOpening{G}) where G <: Group = Tree(c, ndigits(order(G), base=256))
 
 function Base.convert(::Type{CastOpening{G}}, tree::Tree) where G <: Group
-    β, history, commitment, opening, decoy, π_t = convert(Tuple{BigInt, Vector{BigInt}, SignedVoteCommitment{G}, VoteOpening, DecoyOpening, SchnorrProof{G}}, tree)
-    return CastOpening(β, history, commitment, opening, decoy, π_t)
+    β, history, record, opening, decoy, π_t = convert(Tuple{BigInt, Vector{BigInt}, CastRecord{G}, VoteOpening, DecoyOpening, SchnorrProof{G}}, tree)
+    return CastOpening(β, history, record, opening, decoy, π_t)
 end
 
 function Parser.Tree(v::Vote{G}) where G <: Group
