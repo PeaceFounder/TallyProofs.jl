@@ -20,12 +20,12 @@ recommits = ReCommit{G}[]
 
 function recommit!(calc, chg)
 
-    C, A, oppening = TallyProofs.recommit!(calc, chg)
+    C, A, opening = TallyProofs.recommit!(calc, chg)
     @test check_challenge(C, A, calc.u, chg, prghash)
 
     push!(C_vec, C)
     push!(A_vec, A)
-    push!(recommits, oppening)
+    push!(recommits, opening)
 
     return length(C_vec) # The cast index
 end

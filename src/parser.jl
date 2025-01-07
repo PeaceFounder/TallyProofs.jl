@@ -30,18 +30,18 @@ function Base.convert(::Type{VoteCommitment{G}}, tree::Tree) where G <: Group
     return VoteCommitment(Q, R, V)
 end
 
-Parser.Tree(oppening::TrackerOppening, L::Int) = Tree((Leaf(oppening.α, L), Leaf(oppening.λ, L), Leaf(oppening.β, L), Leaf(oppening.θ, L)))
+Parser.Tree(opening::TrackerOpening, L::Int) = Tree((Leaf(opening.α, L), Leaf(opening.λ, L), Leaf(opening.β, L), Leaf(opening.θ, L)))
 
-function Base.convert(::Type{TrackerOppening}, tree::Tree)
+function Base.convert(::Type{TrackerOpening}, tree::Tree)
     α, λ, β, θ = convert(Tuple{BigInt, BigInt, BigInt, BigInt}, tree)
-    return TrackerOppening(α, λ, β, θ)
+    return TrackerOpening(α, λ, β, θ)
 end
 
-Parser.Tree(oppening::VoteOppening, L::Int) = Tree((Tree(oppening.tracker, L), Leaf(oppening.selection, L), Leaf(oppening.γ, L)))
+Parser.Tree(opening::VoteOpening, L::Int) = Tree((Tree(opening.tracker, L), Leaf(opening.selection, L), Leaf(opening.γ, L)))
 
-function Base.convert(::Type{VoteOppening}, tree::Tree)
-    tracker, selection, γ = convert(Tuple{TrackerOppening, BigInt, BigInt}, tree)
-    return VoteOppening(tracker, selection, γ)
+function Base.convert(::Type{VoteOpening}, tree::Tree)
+    tracker, selection, γ = convert(Tuple{TrackerOpening, BigInt, BigInt}, tree)
+    return VoteOpening(tracker, selection, γ)
 end
 
 Parser.Tree(signature::Signature) = Tree((signature.pbkey, signature.proof))
@@ -73,30 +73,30 @@ function Base.convert(::Type{SignedVoteCommitment{G}}, tree::Tree) where G <: Gr
     return SignedVoteCommitment(proposal_leaf.x, ux, commitment, I_leaf.x, pok, signature)
 end
 
-Parser.Tree(decoy::DecoyOppening, L::Int) = Tree((Leaf(decoy.θ, L), Leaf(decoy.λ, L), Leaf(decoy.selection, L)))
+Parser.Tree(decoy::DecoyOpening, L::Int) = Tree((Leaf(decoy.θ, L), Leaf(decoy.λ, L), Leaf(decoy.selection, L)))
 
-function Base.convert(::Type{DecoyOppening}, tree::Tree)
+function Base.convert(::Type{DecoyOpening}, tree::Tree)
     θ, λ, selection = convert(Tuple{BigInt, BigInt, BigInt}, tree)
-    return DecoyOppening(θ, λ, selection)
+    return DecoyOpening(θ, λ, selection)
 end
 
-Parser.Tree(c::CastOppening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.commitment, Tree(c.oppening, L), Tree(c.decoy, L)))
-Parser.Tree(c::CastOppening{G}) where G <: Group = Tree(c, ndigits(order(G), base=256))
+Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.commitment, Tree(c.opening, L), Tree(c.decoy, L), c.π_t))
+Parser.Tree(c::CastOpening{G}) where G <: Group = Tree(c, ndigits(order(G), base=256))
 
-function Base.convert(::Type{CastOppening{G}}, tree::Tree) where G <: Group
-    β, history, commitment, oppening, decoy = convert(Tuple{BigInt, Vector{BigInt}, SignedVoteCommitment{G}, VoteOppening, DecoyOppening}, tree)
-    return CastOppening(β, history, commitment, oppening, decoy)
+function Base.convert(::Type{CastOpening{G}}, tree::Tree) where G <: Group
+    β, history, commitment, opening, decoy, π_t = convert(Tuple{BigInt, Vector{BigInt}, SignedVoteCommitment{G}, VoteOpening, DecoyOpening, SchnorrProof{G}}, tree)
+    return CastOpening(β, history, commitment, opening, decoy, π_t)
 end
 
 function Parser.Tree(v::Vote{G}) where G <: Group
     if isnothing(v.signature)
-        return Tree((v.proposal, v.C, v.oppening))
+        return Tree((v.proposal, v.C, v.opening))
     else
-        return Tree((v.proposal, v.C, v.oppening, v.signature))
+        return Tree((v.proposal, v.C, v.opening, v.signature))
     end
 end
 
 function Base.convert(::Type{Vote{G}}, tree::Tree) where G <: Group
-    proposal_leaf, C, oppening, signature = convert(Tuple{Leaf, G, Encryption{CastOppening{G}, G}, Signature{G}}, tree)
-    return Vote(proposal_leaf.x, C, oppening, signature)
+    proposal_leaf, C, opening, signature = convert(Tuple{Leaf, G, Encryption{CastOpening{G}, G}, Signature{G}}, tree)
+    return Vote(proposal_leaf.x, C, opening, signature)
 end

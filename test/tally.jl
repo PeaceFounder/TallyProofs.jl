@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOppening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOppening, count_votes
+import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, Vote, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -30,23 +30,26 @@ cast_commitments = G[]
 #cast_proofs = G[]
 
 # Secrets for tallying authorithy
-cast_oppenings = CastOppening{G}[]
+cast_openings = CastOpening{G}[]
 
-function deliver_vote!(vote)
+function record_vote!(vote)
 
     @test vote.proposal == hasher(encode(Tree(proposal))) # "Incorrect proposal"
 
     alias = findfirst(isequal(vote.signature.pbkey), members)
     @test !isnothing(alias) #"Voter is not a registered member"
 
-    @test verify(vote, g) # "The signature is not valid"
-    # recommit and consistency with oppening should be also performed
+    @test verify(vote, proposal.g) # "The signature is not valid"
+    # recommit and consistency with opening should be also performed
+    
+    cast_opening = decrypt(vote.opening, tallying_authorithy_key, proposal.encrypt_spec)
+    @test isbinding(vote.C, cast_opening, proposal.basis.h)
+    @test isconsistent(cast_opening, proposal, verifier)
+
+    @test isconsistent(cast_openings, cast_opening)
 
     push!(cast_commitments, vote.C)
-    #push!(cast_proofs, vote.A)
-    
-    cast_oppening = decrypt(vote.oppening, tallying_authorithy_key, proposal.encrypt_spec)
-    push!(cast_oppenings, cast_oppening)
+    push!(cast_openings, cast_opening)
 
     cast_index = length(cast_commitments)
     
@@ -61,13 +64,15 @@ function cast_vote!(voter, selection, chg, pin)
     @test Tree(convert(Vote{G}, tree)) == tree
     #@show length(encode(tree))
 
-    @test check_challenge(envelope, chg, voter.hasher)
-    @test verify(envelope.vote, g) # "The signature is not valid" # g, hasher
+    @test isconsistent(envelope, chg, g, voter.hasher, voter.verifier)
 
-    alias, cast_index = deliver_vote!(envelope.vote)
+    #@test check_challenge(envelope, chg, voter.hasher)
+    #@test verify(envelope.vote, g) # "The signature is not valid" # g, hasher
+
+    alias, cast_index = record_vote!(envelope.vote)
     # cast_index is kept by the voting device for locting cast commitment on the buletin board
     
-    return CastReceipt(alias, envelope.id, envelope.w)
+    return CastReceipt(alias, envelope.id, hasher(octet(envelope.w)))
 end
 
 pin = 4321 # The same pin code for all calculators
@@ -92,8 +97,8 @@ eve_receipt = cast_vote!(eve, 5, 3415, fake_pin)
 eve_receipt = cast_vote!(eve, 11, 3415, fake_pin)
 
 # Now the authorithy creates a few dummy votes
-decoy_votes = [DecoyOppening(8, 2:order(G) - 1), DecoyOppening(9, 2:order(G) - 1)]
-simulator = tally(proposal, cast_commitments, cast_oppenings, verifier; skip_list = [g^ted_key], decoy_votes)
+decoy_votes = [DecoyOpening(8, 2:order(G) - 1), DecoyOpening(9, 2:order(G) - 1)]
+simulator = tally(proposal, cast_commitments, cast_openings, verifier; skip_list = [g^ted_key], decoy_votes)
 @test verify(simulator)
 
 # now comes the verifications

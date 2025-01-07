@@ -18,7 +18,7 @@ function get_token(tally::Tally{G}, members::Vector{G}, receipt::CastReceipt, ha
 
     I = hasher([w; id])
 
-    @check vote_commitment.I == I "Identity commitment is not consistent with provided oppenings. Cannot assert exclusive ownership of the pseudonym. Your voting device have provided incorrect receipt for the cast vote if the same problem occurs using different devices for verifying."
+    @check vote_commitment.I == I "Identity commitment is not consistent with provided openings. Cannot assert exclusive ownership of the pseudonym. Your voting device have provided incorrect receipt for the cast vote if the same problem occurs using different devices for verifying."
 
     return tally.tokens[N]
 end

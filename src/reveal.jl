@@ -19,6 +19,8 @@ struct VoteCommitment{G <: Group}
     V::G
 end
 
+Base.:(==)(x::T, y::T) where T <: VoteCommitment = x.Q == y.Q && x.R == y.R && x.V == y.V
+
 function tracker_commitment(vote::VoteCommitment, e::BigInt)
     (; Q, R) = vote
     return Q^e * R
@@ -26,7 +28,7 @@ end
 
 vote_commitment(vote::VoteCommitment) = vote.V
 
-struct TrackerOppening
+struct TrackerOpening
     # Q
     α::BigInt # blinding factors for tracker
     λ::BigInt
@@ -36,7 +38,7 @@ struct TrackerOppening
     θ::BigInt # blinding factor for the generator
 end
 
-function TrackerOppening(range::UnitRange{<:Integer}; roprg = gen_roprg())
+function TrackerOpening(range::UnitRange{<:Integer}; roprg = gen_roprg())
 
     α = rand(roprg(:α), range)
     λ = rand(roprg(:λ), range)
@@ -44,24 +46,26 @@ function TrackerOppening(range::UnitRange{<:Integer}; roprg = gen_roprg())
     β = rand(roprg(:β), range)
     θ = rand(roprg(:θ), range)
 
-    return TrackerOppening(α, λ, β, θ)
+    return TrackerOpening(α, λ, β, θ)
 end
 
-struct VoteOppening # order changed
-    tracker::TrackerOppening
+Base.:(==)(x::T, y::T) where T <: TrackerOpening = x.α == y.α && x.λ == y.λ && x.β == y.β && x.θ == y.θ
+
+struct VoteOpening # order changed
+    tracker::TrackerOpening
     selection::BigInt #NTuple{N, BigInt}
     γ::BigInt
 end
 
-function VoteOppening(tracker::TrackerOppening, selection::Integer, range::UnitRange{<:Integer}; roprg = gen_roprg()) 
+function VoteOpening(tracker::TrackerOpening, selection::Integer, range::UnitRange{<:Integer}; roprg = gen_roprg()) 
     γ = rand(roprg(:β), range)
-    return VoteOppening(tracker, selection, γ)
+    return VoteOpening(tracker, selection, γ)
 end
 
-function commitment(oppening::TrackerOppening, setup::GeneratorSetup{G}) where G <: Group
+function commitment(opening::TrackerOpening, setup::GeneratorSetup{G}) where G <: Group
 
     (; h, g) = setup
-    (; α, β, λ, θ) = oppening
+    (; α, β, λ, θ) = opening
     
     Q = h^α * g^λ
     R = h^β * g^θ
@@ -69,13 +73,13 @@ function commitment(oppening::TrackerOppening, setup::GeneratorSetup{G}) where G
     return (Q, R)
 end
 
-function commitment(oppening::VoteOppening, setup::GeneratorSetup{G}) where G <: Group 
+function commitment(opening::VoteOpening, setup::GeneratorSetup{G}) where G <: Group 
     
     #(; h, o) = setup
     (; h, g) = setup
-    (; γ, selection) = oppening
+    (; γ, selection) = opening
 
-    Q, R = commitment(oppening.tracker, setup)
+    Q, R = commitment(opening.tracker, setup)
 
     if iszero(γ) 
         V = iszero(selection) ? one(G) : g^selection
@@ -86,8 +90,8 @@ function commitment(oppening::VoteOppening, setup::GeneratorSetup{G}) where G <:
     return VoteCommitment(Q, R, V)
 end
 
-function isbinding(C::VoteCommitment{G}, oppening::VoteOppening, setup::GeneratorSetup{G}) where {G <: Group}
-    return C == commitment(oppening, setup)
+function isbinding(C::VoteCommitment{G}, opening::VoteOpening, setup::GeneratorSetup{G}) where {G <: Group}
+    return C == commitment(opening, setup)
 end
 
 struct VoteRecord
@@ -138,41 +142,41 @@ function tracker(θ::Integer, λ::Integer, chg::Integer, order::Integer)
     return mod(t, order)
 end
 
-function tracker(tracker_oppening::TrackerOppening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
-    (; θ, λ) = tracker_oppening
+function tracker(tracker_opening::TrackerOpening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
+    (; θ, λ) = tracker_opening
     return tracker(θ, λ, chg, order)
 end
 
-function tracker(vote_oppening::VoteOppening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
-    return tracker(vote_oppening.tracker, chg, order)
+function tracker(vote_opening::VoteOpening, chg::Integer, order::Integer) #, setup::GeneratorSetup)
+    return tracker(vote_opening.tracker, chg, order)
 end
 
-function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_oppenings::Vector{<:VoteOppening}) where {G <: Group}
+function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_openings::Vector{<:VoteOpening}) where {G <: Group}
     
-    tally = VoteRecord[VoteRecord(tracker(oppening, chg, order(G)), oppening.selection) for (chg, oppening) in zip(tracker_challenges, vote_oppenings)]
+    tally = VoteRecord[VoteRecord(tracker(opening, chg, order(G)), opening.selection) for (chg, opening) in zip(tracker_challenges, vote_openings)]
 
     return RevealShuffle(setup, tracker_challenges, vote_commitments, tally)
 end
 
-function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_oppenings::Vector{<:VoteOppening}, verifier::Verifier; roprg = gen_roprg()) where G <: Group
+function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_openings::Vector{<:VoteOpening}, verifier::Verifier; roprg = gen_roprg()) where G <: Group
 
-    proposition = reveal(setup, tracker_challenges, vote_commitments, vote_oppenings)
+    proposition = reveal(setup, tracker_challenges, vote_commitments, vote_openings)
     
     𝛙 = sortperm(proposition.tally, by = x -> x.tracker)
     permute!(proposition, 𝛙)
 
-    proof = prove(proposition, verifier, vote_oppenings, 𝛙; roprg)
+    proof = prove(proposition, verifier, vote_openings, 𝛙; roprg)
 
     return Simulator(proposition, proof, verifier)
 end
 
-function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_oppenings::AbstractVector{<:VoteOppening}, 𝛙::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
+function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_openings::AbstractVector{<:VoteOpening}, 𝛙::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
 
     (; setup, tally, tracker_challenges, vote_commitments) = proposition
     (; h, g) = proposition.setup
 
-    𝐫T = [- i.tracker.β - i.tracker.α * ei for (i, ei) in zip(vote_oppenings, tracker_challenges)]
-    𝐫V = [-i.γ for i in vote_oppenings]
+    𝐫T = [- i.tracker.β - i.tracker.α * ei for (i, ei) in zip(vote_openings, tracker_challenges)]
+    𝐫V = [-i.γ for i in vote_openings]
     𝐫′ = [𝐫T 𝐫V] # 
 
     T_vec = (tracker_commitment(com, chg) for (com, chg) in zip(vote_commitments, tracker_challenges))
@@ -189,8 +193,8 @@ function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_oppenings
 
     Q_vec = (i.Q for i in vote_commitments)
 
-    α = (i.tracker.α for i in vote_oppenings)
-    λ = (i.tracker.λ for i in vote_oppenings)
+    α = (i.tracker.α for i in vote_openings)
+    λ = (i.tracker.λ for i in vote_openings)
 
     lambda_proofs = [prove(LambdaCommitment(h, g, Qi), verifier, λi, αi; roprg = gen_roprg(roprg("$Qi"))) for (Qi, λi, αi) in zip(Q_vec, λ, α)]
     
