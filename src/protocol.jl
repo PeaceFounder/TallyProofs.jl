@@ -1,5 +1,5 @@
 using CryptoGroups: Group, order, octet
-using CryptoGroups.Utils: int2octet, octet2int
+using CryptoGroups.Utils: int2octet, int2octet!, octet2int
 using CryptoPRG: HashSpec
 using CryptoPRG.Verificatum: PRG
 using SigmaProofs.LogProofs: SchnorrProof, LogKnowledge
@@ -168,6 +168,15 @@ struct CastOpening{G <: Group}
     π_t::SchnorrProof{G}
 end
 
+# verifiable_seed
+function seed(π::SchnorrProof{G}) where G <: Group
+    
+    buffer = zeros(UInt8, ndigits(order(G), base=256))
+    int2octet!(buffer, π.s)
+
+    return buffer
+end
+
 function isconsistent(cast::CastOpening{G}, proposal::Proposal{G}, verifier::Verifier) where G <: Group
 
     commitment(cast.opening, proposal.basis) == cast.record.commitment || return false
@@ -176,8 +185,8 @@ function isconsistent(cast::CastOpening{G}, proposal::Proposal{G}, verifier::Ver
     (; pbkey) = cast.record.signature
     (; g) = proposal
 
-    verify(LogKnowledge(g, pbkey), π_t, verifier) || return false
-    TrackerOpening(2:order(G)-1; roprg = gen_roprg(int2octet(π_t.s))) == cast.opening.tracker || return false
+    verify(LogKnowledge(g, pbkey), π_t, verifier; suffix = b"TRACKER") || return false
+    TrackerOpening(2:order(G)-1; roprg = gen_roprg(seed(π_t))) == cast.opening.tracker || return false
 
     return isconsistent(cast.record, proposal.g, proposal.hasher, verifier) 
 end

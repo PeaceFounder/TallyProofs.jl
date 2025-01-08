@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding
+import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, check_challenge, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding, seed
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -58,21 +58,19 @@ end
 
 function cast_vote!(voter, selection, chg, pin)
    
-    envelope = assemble_vote!(voter, selection, chg, pin; inherit_challenge=false)
+    context = assemble_vote!(voter, selection, chg, pin; inherit_challenge=false)
 
-    tree = Tree(envelope.vote)
+    tree = Tree(context.vote)
     @test Tree(convert(VoteEnvelope{G}, tree)) == tree
+
     #@show length(encode(tree))
 
-    @test isconsistent(envelope, chg, g, voter.hasher, voter.verifier)
+    @test isconsistent(context, chg, g, voter.hasher, voter.verifier)
 
-    #@test check_challenge(envelope, chg, voter.hasher)
-    #@test verify(envelope.vote, g) # "The signature is not valid" # g, hasher
-
-    alias, cast_index = record_vote!(envelope.vote)
+    alias, cast_index = record_vote!(context.vote)
     # cast_index is kept by the voting device for locting cast commitment on the buletin board
     
-    return CastReceipt(alias, envelope.id, hasher(octet(envelope.w)))
+    return CastReceipt(alias, context.id, seed(context.π_w))
 end
 
 pin = 4321 # The same pin code for all calculators
@@ -91,7 +89,7 @@ bob_receipt = cast_vote!(bob, 0, 3454, pin)
 ted_receipt = cast_vote!(ted, 4, 1245, pin)
 
 fake_pin = 2341 # pin code that is shown to a coercer
-seed = create_decoy_credential!(eve, fake_pin, pin)
+eve_seed = create_decoy_credential!(eve, fake_pin, pin)
 
 eve_receipt = cast_vote!(eve, 5, 3415, fake_pin)
 eve_receipt = cast_vote!(eve, 11, 3415, fake_pin)
@@ -117,7 +115,7 @@ ted_tracker = compute_tracker(ted, ted_token, pin) # this is a hash of the track
 N = findfirst(x -> x.tracker == ted_tracker, simulator.proposition.tally)
 @test isnothing(N)
 
-coercion_tracker = compute_tracker(proposal, seed, simulator.proposition.coercion_token)
+coercion_tracker = compute_tracker(proposal, eve_seed, simulator.proposition.coercion_token)
 N = findfirst(x -> x.tracker == coercion_tracker, simulator.proposition.tally)
 @test !isnothing(N)
 @test simulator.proposition.tally[N].selection == 11
@@ -140,7 +138,7 @@ real_eve_tracker = compute_tracker(eve, eve_token, pin)
 # pin codes must be indistinguishable to coercer hence:
 second_fake_pin = 4566 
 
-seed2 = create_decoy_credential!(eve, second_fake_pin, pin)
+eve_seed2 = create_decoy_credential!(eve, second_fake_pin, pin)
 install_decoy_tracker!(eve, coercion_tracker, second_fake_pin)
 
 second_eve_tracker = compute_tracker(eve, eve_token, second_fake_pin)

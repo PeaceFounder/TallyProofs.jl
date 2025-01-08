@@ -1,11 +1,8 @@
-# any pin code is sufficient 
 struct CastReceipt
     alias::Int
     id::Vector{UInt8}
     w::Vector{UInt8} # the blinding factor
 end
-
-#function get_token(tally::Tally{G}, cast_proofs::Vector{G}, members::Vector{G}, receipt::CastReceipt, hasher::HashSpec; skip_checks=false, commitment_challenge = receipt.chg) where G <: Group
 
 function get_token(tally::Tally{G}, members::Vector{G}, receipt::CastReceipt, hasher::HashSpec; skip_checks=false) where G <: Group
 
@@ -16,7 +13,7 @@ function get_token(tally::Tally{G}, members::Vector{G}, receipt::CastReceipt, ha
     N = findfirst(x -> x.signature.pbkey == pseudonym, tally.vote_commitments)
     vote_commitment = tally.vote_commitments[N]
 
-    I = hasher([w; id])
+    I = commitment(w, id, hasher)
 
     @check vote_commitment.I == I "Identity commitment is not consistent with provided openings. Cannot assert exclusive ownership of the pseudonym. Your voting device have provided incorrect receipt for the cast vote if the same problem occurs using different devices for verifying."
 
@@ -41,8 +38,6 @@ function count_votes(tally::Tally)
     
     return sorted_tuples
 end
-
-
 
 function isconsistent(a::AbstractVector{T}, b::T) where T <: CastOpening
     

@@ -2,10 +2,13 @@ using CryptoGroups: Group, order, octet
 using CryptoGroups.Utils: int2octet!, octet2int, @check
 using CryptoPRG: HashSpec
 using CryptoPRG.Verificatum: PRG
-using SigmaProofs.LogProofs: SchnorrProof, LogKnowledge, LogEquality, ChaumPedersenProof
+using SigmaProofs.LogProofs: SchnorrProof, LogKnowledge
 using SigmaProofs.Parser: Tree, encode
 using SigmaProofs.Verificatum: generator_basis, GeneratorBasis
 import SigmaProofs: prove, verify
+
+# Hash commitment
+commitment(blind::Vector{UInt8}, value::Vector{UInt8}, hasher::HashSpec) = hasher([blind; value])
 
 struct OverrideMask
     pin::Int
@@ -27,8 +30,9 @@ end
 
 struct VotingCalculator{G <: Group} # More preciselly it would be VotingCalculatorInstance
     id::Vector{UInt8}
-    w::G
-    π_w::ChaumPedersenProof{G}
+    π_w::SchnorrProof{G}
+    #w::G
+    #π_w::ChaumPedersenProof{G}
 
     proposal::Proposal{G}
 
@@ -62,21 +66,16 @@ function VotingCalculator(id::AbstractVector{UInt8}, proposal::Proposal{G}, veri
 
     pseudonym = g^key
 
-    π_t = prove(LogKnowledge(g, pseudonym), verifier, key; roprg = gen_roprg(roprg(:π_t)))
-    tracker = TrackerOpening(2:order(G)-1; roprg = gen_roprg(int2octet(π_t.s)))
+    π_w = prove(LogKnowledge(g, pseudonym), verifier, key; roprg = gen_roprg(roprg(:π_w)), suffix = b"ID") # 
+    I = commitment(seed(π_w), id, hasher)
 
-    # verifiable secret construction from the secret key
-    w0 = map2generator(pseudonym, hasher)
-    w = w0^key
-    π_w = prove(LogEquality([g, w0], [pseudonym, w]), verifier, key; roprg = gen_roprg(roprg(:π_w)))
-
-    I = hasher([hasher(octet(w)); id])
-
-    #u = map2generator(pseudonym, h_QR, I, hasher)
     u = sup_generator(pseudonym, I, hasher)
     sup_calc = SupersessionCalculator(h, u, verifier; history_width, roprg)
 
-    return VotingCalculator(id, w, π_w, proposal, verifier, hasher, sup_calc, pseudonym, key |> BigInt, pin, tracker, π_t, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
+    π_t = prove(LogKnowledge(g, pseudonym), verifier, key; roprg = gen_roprg(roprg(:π_t)), suffix = b"TRACKER")
+    tracker = TrackerOpening(2:order(G)-1; roprg = gen_roprg(seed(π_t)))
+
+    return VotingCalculator(id, π_w, proposal, verifier, hasher, sup_calc, pseudonym, key |> BigInt, pin, tracker, π_t, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
 end
 
 # Installs override tracker for VotingCalculator for override_pin code. Leaves verification to verifier_pin
@@ -171,18 +170,15 @@ struct VoteContext{G}
     vote::VoteEnvelope{G}
     A::G 
     id::Vector{UInt8}
-    w::G # 
-    π_w::ChaumPedersenProof
+    π_w::SchnorrProof{G}
 end
 
 function sup_generator(envelope::VoteContext, hasher::HashSpec)
 
-    (; id, w) = envelope
+    (; id, π_w) = envelope
     (; pbkey) = envelope.vote.signature
 
-    I = hasher([hasher(octet(w)); id])
-    
-    seed = hasher([octet(pbkey); I])
+    I = commitment(seed(π_w), id, hasher)
 
     return sup_generator(pbkey, I, hasher)
 end
@@ -192,10 +188,9 @@ function isconsistent(envelope::VoteContext, τ::Integer, g::G, hasher::HashSpec
 
     (; C) = envelope.vote
     (; pbkey) = envelope.vote.signature
-    (; A, id, w, π_w) = envelope
+    (; A, id, π_w) = envelope
 
-    w0 = map2generator(pbkey, hasher)
-    verify(LogEquality([g, w0], [pbkey, w]), π_w, verifier) || return false
+    verify(LogKnowledge(g, pbkey), π_w, verifier; suffix = b"ID") || return false
 
     u = sup_generator(envelope, hasher)
     
@@ -235,9 +230,9 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
 
     proposal_hash = voter.hasher(encode(Tree(voter.proposal)))
 
-    (; w, π_w, id) = voter
+    (; π_w, id) = voter
     (; hasher) = voter.proposal
-    I = hasher([hasher(octet(w)); id])
+    I = commitment(seed(π_w), id, hasher)
 
     signed_vote_commitment = CastRecord(proposal_hash, ux, vote_commitment, I, pok, signer)
 
@@ -249,7 +244,7 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
 
     vote = VoteEnvelope(proposal_hash, C, cast_opening_enc, signer)
 
-    vote_envelope = VoteContext(vote, A, id, w, π_w)
+    vote_envelope = VoteContext(vote, A, id, π_w)
 
     return vote_envelope
 end
