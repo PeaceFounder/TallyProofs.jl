@@ -24,10 +24,17 @@ include("kem.jl")
 include("supersession.jl")
 include("pedersen.jl")
 include("shuffle.jl")
+
 include("protocol.jl")
 include("tally.jl")
 include("calculator.jl")
+
+
 include("extra.jl")
 include("parser.jl")
+
+
+export Proposal, CastOpening, tally, verify, count_votes, isconsistent, isbinding
+export VotingCalculator, assemble_vote!, get_token, compute_tracker, decrypt, CastReceipt, seed
 
 end

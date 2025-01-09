@@ -15,3 +15,7 @@ end
 @safetestset "Tally Proofs" begin
     include("tally.jl")
 end
+
+@safetestset "Example" begin
+    include("example.jl")
+end

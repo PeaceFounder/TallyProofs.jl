@@ -56,7 +56,7 @@ struct VotingCalculator{G <: Group} # More preciselly it would be VotingCalculat
     decoys::Vector{DecoyCredential}
 end
 
-function VotingCalculator(id::AbstractVector{UInt8}, proposal::Proposal{G}, verifier::Verifier, key::Integer, pin::Int; roprg = gen_roprg(), history_width::Int = 5) where G <: Group
+function VotingCalculator(id::AbstractVector{UInt8}, proposal::Proposal{G}, verifier::Verifier, pin::Int; roprg = gen_roprg(), history_width::Int = 5, key = rand(roprg(:key), 2:order(G) - 1)) where G <: Group
 
     id = convert(Vector{UInt8}, id) 
     hasher = verifier.prghash # the verifier could implement hasher method
