@@ -1,6 +1,8 @@
 # TallyProofs.jl
 
-TallyProofs.jl implements the cryptographic core of a novel electronic voting system that achieves both coercion resistance and end-to-end verifiability. The system's key innovation is its post-cast isolation approach - voters use a secure calculator device that remains offline between vote casting and verification phases. This design enables voters to verify their votes while maintaining privacy and coercion resistance, without requiring complex threshold ceremonies or trust in multiple parties.
+![](docs/assets/setup.svg)
+
+TallyProofs.jl implements the cryptographic core of a novel electronic voting system that achieves both coercion resistance and end-to-end verifiability. The system's key innovation is its post-cast isolation approach - voters use a secure calculator device that remains offline between vote casting and verification phases. This design enables voters to verify their votes while maintaining privacy and coercion resistance without requiring complex threshold ceremonies or trust in multiple parties.
 
 The system combines three innovative security mechanisms:
 1. A deniable revoting protocol using supersession commitments, which allows voters to update their votes without detection
@@ -194,10 +196,9 @@ The skip_list parameter specifies pseudonyms to exclude from tallying. The verif
 
 To cite this work, please use:
 
-Erdmanis, J. (2024). **Unconditional Individual Verifiability with Coercion Resistance via Post-Cast Isolation.** Manuscript in preparation.
+Erdmanis, J. (2025). *Unconditional Individual Verifiability with Coercion Resistance via Post-Cast Isolation.* Manuscript in preparation.
 
-The paper describing the system's cryptographic protocols and security proofs is currently in a draft stage and may change with more security analysis. 
-
+The paper describing the system's cryptographic protocols and security mechanisms is currently in the draft stage and may change with a more thorough analysis. 
 
 
 
