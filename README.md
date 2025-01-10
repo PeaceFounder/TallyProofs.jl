@@ -1,6 +1,6 @@
 # TallyProofs.jl
 
-![](docs/assets/setup.svg)
+![](docs/assets/setup.webp)
 
 TallyProofs.jl implements the cryptographic core of a novel electronic voting system that achieves both coercion resistance and end-to-end verifiability. The system's key innovation is its post-cast isolation approach - voters use a secure calculator device that remains offline between vote casting and verification phases. This design enables voters to verify their votes while maintaining privacy and coercion resistance without requiring complex threshold ceremonies or trust in multiple parties.
 
