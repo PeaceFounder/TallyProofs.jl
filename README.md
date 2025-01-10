@@ -27,18 +27,16 @@ using Pkg
 Pkg.add("https://github.com/PeaceFounder/TallyProofs.jl")
 ```
 
-TallyProofs.jl is compatible with all Julia-supported platforms (Linux, MacOS, Windows, FreeBSD, etc.). The package has no binary dependencies and all requirements are handled automatically during installation, ensuring robust operation across environments with minimal maintenance.
+TallyProofs.jl is compatible with all Julia-supported platforms (Linux, MacOS, Windows, FreeBSD, etc.). The package has no binary dependencies, and all requirements are handled automatically during installation, ensuring robust operation across environments with minimal maintenance.
 
 ## Implementation Scope
 
 This package demonstrates the core cryptographic protocols of the voting system. For clarity and testing purposes, this prototype combines the bulletin board and tallier into a single entity. In a production environment, these would be separate components with distinct responsibilities.
 
 A complete deployment would require additional components:
-- Voting calculator firmware running on isolated, tamper-resistant hardware
-- A voting device application that performs integrity checks and transmits votes via anonymous channels
-- A distributed bulletin board system
-- A secure key management infrastructure
-- Network infrastructure for anonymous communication
+- Voting calculator firmware running on isolated, tamper-resistant hardware (isolation is sufficient for individual verifiability, whereas tamper resistance is necessary for coercion resistance)
+- A voting device application that performs integrity checks and transmits votes via anonymous channels (e.g., Tor)
+- An accountable append-only bulletin board system
 
 While implementing these additional components involves primarily standard software engineering practices, proper security implementation requires significant attention to detail and careful system design.
 
