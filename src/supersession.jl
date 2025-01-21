@@ -29,14 +29,11 @@ mutable struct SupersessionCalculator{G <: Group}
     const u::G
     const width::Int
     history::Vector{BigInt} # qs, this needs to be carried over
-    x::BigInt # The current value
-    ux::G # also the current value
     verifier::Verifier
     prghash::HashSpec
 
     function SupersessionCalculator(h::G, u::G, verifier::Verifier, prghash::HashSpec; roprg = gen_roprg(), history_width::Int = 5) where G <: Group
-        x = rand(roprg(:x), 2:order(G)-1)
-        new{G}(h, u, history_width, zeros(BigInt, history_width), x, u^x, verifier, prghash)
+        new{G}(h, u, history_width, zeros(BigInt, history_width), verifier, prghash)
     end
 end
 
@@ -62,33 +59,30 @@ exponent_field(::Type{G}) where G <: Group = FP{static(order(G))}
 
 function recommit!(calc::SupersessionCalculator{G}, chg::Integer; roprg = gen_roprg()) where G <: Group
 
-    (; u, h, x, prghash, verifier) = calc
+    (; u, h, prghash, verifier) = calc
 
     β = rand(roprg(:β), 2:order(G)-1)
+    x = rand(roprg(:x), 2:order(G)-1)
+
     A = h^β * u^x
     
     p = compute_p(A, chg, prghash) 
     
-    x′ = x + p % order(G)
-    q = x * invmod(x′, order(G)) % order(G)
+    x′ = (x + p) % order(G)
     
     ux = u^x′
     C = h^β * ux
     
     pok = prove(LogKnowledge(u, ux), verifier, x′)
 
+    recommit = ReCommit(β, u, ux, copy(calc.history), pok)
+
     N = iszero(calc.history[1]) ? 0 : findlast(!iszero, calc.history)
     L = rand(roprg(:L), 1:calc.width)
 
     append!(calc.history, (0 for i in (length(calc.history) + 1):(N + L)))
-
-    calc.history[N + 1] = q
-
-    calc.x = x′
-    calc.ux = ux
     
-    # Return the history without the first element
-    recommit = ReCommit(β, u, ux, calc.history[2:end], pok)
+    calc.history[N + 1] = x′
     
     return C, A, recommit
 end
@@ -112,8 +106,9 @@ end
 
 struct SupersessionProof{G <: Group} <: Proof
     A::G 
-    s::BigInt
-    𝐭::Vector{BigInt}
+    t::BigInt
+    r::Vector{BigInt}
+    s::Vector{BigInt}
 end
 
 proof_type(::Type{Supersession{G}}) where G <: Group = SupersessionProof{G}
@@ -133,34 +128,43 @@ end
 
 function prove(proposition::Supersession{G}, verifier::Verifier, ψ::Vector{<:Integer}, β::Vector{<:Integer}, α::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
 
-    (; ux, h, C) = proposition
+    (; u, ux, h, C) = proposition
 
-    z = rand(roprg(:z), 2:order(G)-1)
-    𝐫 = rand(roprg(:𝐫), 2:order(G)-1, length(ux))
+    γ = rand(roprg(:z), 2:order(G)-1)
+    η = rand(roprg(:𝐫), 2:order(G)-1, length(ux))
+    ξ = rand(roprg(:ξ), 2:order(G)-1, length(u))
 
-    A = h^z * prod(ux .^ 𝐫)
+    A = h^γ * prod(ux .^ η) * prod(u .^ ξ)
 
     𝐞 = challenge(verifier, proposition, A)
 
-    s = z + sum(𝐞 .* β) % order(G)
+    t = mod(γ + sum(𝐞 .* β), order(G))
     
-    𝐭 = 𝐫 # 𝐫 is not used anymore and hence we can use already it's allocation
+    # we can reuse blinding factor allocations
+    r = η
+    s = ξ
 
     for (i, (ei, αi)) in enumerate(zip(𝐞, α))
         
-        𝐭[ψ[i]] += ei * αi
+        if αi == 0
+            r[ψ[i]] += ei
+        else
+            s[ψ[i]] += ei * αi
+        end
 
     end
     
-    𝐭 .= mod.(𝐭, order(G))
+    r .= mod.(r, order(G))
+    s .= mod.(s, order(G))
     
-    return SupersessionProof(A, s, 𝐭)
+    return SupersessionProof(A, t, r, s)
 end
 
 function verify(proposition::Supersession{G}, proof::SupersessionProof{G}, verifier::Verifier) where G <: Group
 
     (; u, ux, pok, h, C) = proposition
-    (; A, s, 𝐭) = proof
+
+    (; A, t, r, s) = proof
 
     for (ui, uxi, poki) in zip(u, ux, pok)
 
@@ -170,7 +174,7 @@ function verify(proposition::Supersession{G}, proof::SupersessionProof{G}, verif
     
     𝐞 = challenge(verifier, proposition, A)
 
-    return A * prod(C .^ 𝐞) == h^s * prod(ux .^ 𝐭)
+    return A * prod(C .^ 𝐞) == h^t * prod(ux .^ r) * prod(u .^ s)
 end
 
 
@@ -194,7 +198,7 @@ function extract_maximum_mask(identifiers::Vector{<:Any}, values::Vector{Int})
         end
         i += 1
     end
-    
+
     return mask
 end
 
@@ -215,16 +219,15 @@ function reduce_representation(recommits::Vector{ReCommit{G}}, u_vec::Vector{G},
         ψi = findfirst(isequal(r.u), u_vec)
         
         if r.ux == ux_vec[ψi]
-            α::BigInt = 1
+            α::BigInt = 0 # zero means that the thing should be ux instead
         else
             m = length(trim(r.history))
-            α = mod(prod(history[ψi][m+1:end]), order(G)) # 
+            α = history[ψi][m + 1]
         end
 
         ψ_vec[n] = ψi
         α_vec[n] = α
 
-        #@show r.ux == ux_vec[ψi] ^ α
     end
 
     return ψ_vec, α_vec

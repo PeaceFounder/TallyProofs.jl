@@ -48,7 +48,7 @@ recommit!(bob, 4551)
 alice_first = recommits[1]
 alice_last = recommits[5]
 
-@test alice_first.ux == alice_last.ux ^ prod(trim(alice_last.history))
+@test alice_first.ux == alice_last.u ^ alice_last.history[1]
 
 simulator = supersess(C_vec, h, recommits, verifier)
 @test verify(simulator)

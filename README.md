@@ -117,7 +117,7 @@ end
 alice_receipt = cast_vote!(alice, 3, alice.pin)
 bob_receipt = cast_vote!(bob, 4, bob.pin)
 eve_receipt = cast_vote!(eve, 6, eve.pin)
-bob_receipt = cast_vote!(bob, 0, bob.pin) # anyone can revote
+bob_receipt = cast_vote!(bob, 1, bob.pin) # anyone can revote
 ```
 
 The vote casting process demonstrates the system's core security features. The voting device interfaces with the calculator to construct an encrypted and signed vote. Before submission, the device verifies the cast commitment will bind the bulletin board to publish a vote commitment next to the voter's identity commitment. This enables accountability for vote recording without requiring trust in the calculator.
