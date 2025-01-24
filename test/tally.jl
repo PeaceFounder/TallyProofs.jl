@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, decrypt, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding, seed
+import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, extract_opening, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding, seed
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -37,11 +37,11 @@ function record_vote!(vote)
 
     alias = findfirst(isequal(vote.signature.pbkey), members)
     @test !isnothing(alias) #"Voter is not a registered member"
+    @test verify(vote, proposal.g) # signature check
 
-    cast_opening = decrypt(vote.opening, tallying_authorithy_key, proposal.encrypt_spec)
-    @test isbinding(vote.C, cast_opening, proposal.basis.h)
-    @test isconsistent(cast_opening, proposal, verifier)
-
+    # extracts cast opening and verifies it's consistency
+    cast_opening = extract_opening(vote, proposal, verifier, tallying_authorithy_key)
+    
     @test isconsistent(cast_openings, cast_opening)
 
     push!(cast_commitments, vote.C)
@@ -55,7 +55,7 @@ end
 function cast_vote!(voter, selection, pin)
    
     chg = rand(2:order(G)-1)
-    context = assemble_vote!(voter, selection, chg, pin; inherit_challenge=false)
+    context = assemble_vote!(voter, selection, chg, pin)
 
     tree = Tree(context.vote)
     @test Tree(convert(VoteEnvelope{G}, tree)) == tree

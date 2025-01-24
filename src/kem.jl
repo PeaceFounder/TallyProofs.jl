@@ -33,13 +33,18 @@ function decrypt(ciphertext::Vector{UInt8}, key::Vector{UInt8}, ::AES256_SHA256)
     return Nettle.trim_padding_PKCS5(padded_plaintext)
 end
 
+struct Encap{G}
+    k::Vector{UInt8}
+    c::G
+end
+
 function encap(g::G, y::G; r = rand(RandomDevice(), 2:order(G) - 1)) where G <: Group
 
     t = y^r
     k = octet(t) # further hashing recomended
     c = g^r
 
-    return k, c
+    return Encap(k, c)
 end
 
 function decap(c::Group, sk::Integer)
@@ -50,24 +55,26 @@ function decap(c::Group, sk::Integer)
     return k
 end
 
+decap(encap::Encap) = encap.k
+
 struct Encryption{T, G}
     encapsulation::G
     ciphertext::Vector{UInt8}
 end
 
-function encrypt(msg::T, g::G, pk::G, spec::EncryptSpec) where {T, G <: Group}
-
-    key, c = encap(g, pk)
+function encrypt(msg::T, kc::Encap{G}, spec::EncryptSpec) where {T, G <: Group}
+    
     plaintext = encode(Tree(msg))
     
-    ciphertext = encrypt(plaintext, key, spec)
+    ciphertext = encrypt(plaintext, kc.k, spec)
 
-    return Encryption{T, G}(c, ciphertext)
+    return Encryption{T, G}(kc.c, ciphertext)
 end
 
-function decrypt(msg::Encryption{T, G}, sk::Integer, spec::EncryptSpec) where {T, G <: Group}
+encrypt(msg::T, g::G, pk::G, spec::EncryptSpec) where {T, G <: Group} = encrypt(msg, encap(g, pk), spec)
 
-    key = decap(msg.encapsulation, sk)
+function decrypt(msg::Encryption{T, G}, sk::Integer, spec::EncryptSpec; key = decap(msg.encapsulation, sk)) where {T, G <: Group}
+
     ciphertext = msg.ciphertext
 
     plaintext = decrypt(ciphertext, key, spec)

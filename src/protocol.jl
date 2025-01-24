@@ -14,14 +14,18 @@ struct Signature{G <: Group}
     proof::SchnorrProof{G}
 end
 
-function sign(message::Vector{UInt8}, g::G, key::BigInt) where G <: Group
+function sign(message::Vector{UInt8}, g::G, key::BigInt; r = nothing) where G <: Group
     # This is temporary
     # we should however try to implement Scnorr signatures here according to specification
     verifier = ProtocolSpec(; g)
     
     pbkey = g^key
     
-    proof = prove(LogKnowledge(g, pbkey), verifier, key; suffix = message)
+    if isnothing(r)
+        proof = prove(LogKnowledge(g, pbkey), verifier, key; suffix = message)
+    else
+        proof = prove(LogKnowledge(g, pbkey), verifier, key; suffix = message, r)
+    end
 
     return Signature(pbkey, proof)
 end
@@ -90,12 +94,27 @@ function Proposal(g::G, collector::G, verifier::Verifier; spec = UInt8[], waterm
     return Proposal(spec, g, collector, basis, watermark_nbits, token_max, encrypt_spec, hasher)
 end
 
-function compute_tracker_preimage(proposal::Proposal{G}, seed::Vector{UInt8}) where G <: Group
-    
+function compute_decoy_tracker_seed(proposal::Proposal{G}, seed::Vector{UInt8}) where G <: Group
+
     prg = PRG(proposal.hasher, [seed; encode(Tree(proposal))])
-    θ, λ = rand(prg, 2:order(G) - 1, 2)
+    z = rand(prg, 2:order(G) - 1)
+
+    return z
+end
+
+function compute_tracker_preimage(decoy_seed::G, hasher::HashSpec) where G <: Group
+    
+    θ, λ = rand(PRG(hasher, octet(decoy_seed)), 2:order(G) - 1, 2)
 
     return θ, λ
+end
+
+function compute_tracker_preimage(proposal::Proposal{G}, seed::Vector{UInt8}) where G <: Group
+    
+    z = compute_decoy_tracker_seed(proposal, seed)
+    decoy_seed = proposal.collector ^ z
+
+    return compute_tracker_preimage(decoy_seed, proposal.hasher)
 end
 
 function compute_tracker(proposal::Proposal, seed::Vector{UInt8}, token::Integer)
@@ -116,10 +135,17 @@ function verify_watermark(proposal::Proposal{G}, ux::G, token::Integer, hasher::
     return verify_watermark(token - offset, nbits, octet(ux), hasher; num_positions = watermark_nbits)    
 end
 
-function DecoyOpening(proposal::Proposal{G}, selection::Integer, seed::Vector{UInt8}) where G <: Group
-    θ, λ = compute_tracker_preimage(proposal, seed)
+# function DecoyOpening(proposal::Proposal{G}, selection::Integer, seed::Vector{UInt8}) where G <: Group
+#     θ, λ = compute_tracker_preimage(proposal, seed)
+#     return DecoyOpening(θ, λ, selection)
+# end
+
+function DecoyOpening(hasher::HashSpec, selection::Integer, decoy_seed::G) where G <: Group
+    θ, λ = compute_tracker_preimage(decoy_seed, hasher)
     return DecoyOpening(θ, λ, selection)
 end
+
+
 
 struct CastRecord{G <: Group}
     proposal::Vector{UInt8} # hash
@@ -130,10 +156,10 @@ struct CastRecord{G <: Group}
     signature::Signature{G}
 end
 
-function CastRecord(proposal::Vector{UInt8}, ux::G, commitment::VoteCommitment{G}, I::Vector{UInt8}, pok::SchnorrProof, signer::Signer{G}) where G <: Group
+function CastRecord(proposal::Vector{UInt8}, ux::G, commitment::VoteCommitment{G}, I::Vector{UInt8}, pok::SchnorrProof, signer::Signer{G}; r = nothing) where G <: Group
 
     msg = (proposal, ux, commitment)
-    internal_signature = sign(encode(Tree(msg)), signer.g, signer.key)
+    internal_signature = sign(encode(Tree(msg)), signer.g, signer.key; r)
 
     return CastRecord(proposal, ux, commitment, I, pok, internal_signature)
 end
@@ -165,7 +191,7 @@ struct CastOpening{G <: Group}
     record::CastRecord{G}
     opening::VoteOpening # opening -> vote
     decoy::DecoyOpening
-    π_t::SchnorrProof{G}
+    #π_t::SchnorrProof{G}
 end
 
 # verifiable_seed
@@ -178,16 +204,9 @@ function seed(π::SchnorrProof{G}) where G <: Group
 end
 
 function isconsistent(cast::CastOpening{G}, proposal::Proposal{G}, verifier::Verifier) where G <: Group
-
+    
     commitment(cast.opening, proposal.basis) == cast.record.commitment || return false
-
-    (; π_t) = cast
-    (; pbkey) = cast.record.signature
-    (; g) = proposal
-
-    verify(LogKnowledge(g, pbkey), π_t, verifier; suffix = b"TRACKER") || return false
-    TrackerOpening(2:order(G)-1; roprg = gen_roprg(seed(π_t))) == cast.opening.tracker || return false
-
+    
     return isconsistent(cast.record, proposal.g, proposal.hasher, verifier) 
 end
 

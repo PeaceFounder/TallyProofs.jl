@@ -31,8 +31,6 @@ end
 struct VotingCalculator{G <: Group} # More preciselly it would be VotingCalculatorInstance
     id::Vector{UInt8}
     π_w::SchnorrProof{G}
-    #w::G
-    #π_w::ChaumPedersenProof{G}
 
     proposal::Proposal{G}
 
@@ -47,8 +45,7 @@ struct VotingCalculator{G <: Group} # More preciselly it would be VotingCalculat
     # We shall keep the tracker constant for simplicity
     pin::Int # Pin code for authetification
     tracker::TrackerOpening
-    π_t::SchnorrProof{G} # The proof that tracker have been computed incorporating knowledge of secret key  
-
+    
     current_selection::Ref{BigInt}
     trigger_token::Ref{Union{Int, Nothing}}
     
@@ -72,10 +69,12 @@ function VotingCalculator(id::AbstractVector{UInt8}, proposal::Proposal{G}, veri
     u = sup_generator(pseudonym, I, hasher)
     sup_calc = SupersessionCalculator(h, u, verifier; history_width, roprg)
 
-    π_t = prove(LogKnowledge(g, pseudonym), verifier, key; roprg = gen_roprg(roprg(:π_t)), suffix = b"TRACKER")
-    tracker = TrackerOpening(2:order(G)-1; roprg = gen_roprg(seed(π_t)))
+    w = π_w.s
+    pk_BB = proposal.collector
+    tracker_seed = pk_BB^(w * key)
+    tracker = TrackerOpening(2:order(G)-1; roprg = gen_roprg(octet(tracker_seed)))                       
 
-    return VotingCalculator(id, π_w, proposal, verifier, hasher, sup_calc, pseudonym, key |> BigInt, pin, tracker, π_t, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
+    return VotingCalculator(id, π_w, proposal, verifier, hasher, sup_calc, pseudonym, key |> BigInt, pin, tracker, Ref{BigInt}(0), Ref{Union{Int, Nothing}}(nothing), OverrideMask[], DecoyCredential[])
 end
 
 # Installs override tracker for VotingCalculator for override_pin code. Leaves verification to verifier_pin
@@ -146,24 +145,66 @@ struct VoteEnvelope{G}
     proposal::Vector{UInt8}
     C::G
     opening::Encryption{CastOpening{G}, G}
+    pkw::G # For main tracker oppening
+    gz::G # For decoy tracker oppening (prevents leaks)
+    R0::G # 
     signature::Union{Signature{G}, Nothing}
 end
 
-function VoteEnvelope(proposal::Vector{UInt8}, C::G, opening::Encryption{CastOpening{G}, G}, signer::Signer{G}) where G <: Group
+function VoteEnvelope(proposal::Vector{UInt8}, C::G, opening::Encryption{CastOpening{G}, G}, pkw::G, gz::G, R0::G, signer::Signer{G}) where G <: Group
 
-    unsigned_vote = VoteEnvelope(proposal, C, opening, nothing)
+    unsigned_vote = VoteEnvelope(proposal, C, opening, pkw, gz, R0, nothing)
     signature = sign(encode(Tree(unsigned_vote)), signer.g, signer.key)
 
-    return VoteEnvelope(proposal, C, opening, signature)
+    return VoteEnvelope(proposal, C, opening, pkw, gz, R0, signature)
 end
 
 function verify(vote::VoteEnvelope{G}, g::G) where G <: Group
 
-    (; proposal, C, opening, signature) = vote
-    unsigned_vote = VoteEnvelope(proposal, C, opening, nothing)
+    (; proposal, C, opening, pkw, gz, R0, signature) = vote
+    unsigned_vote = VoteEnvelope(proposal, C, opening, pkw, gz, R0, nothing)
 
     return verify(encode(Tree(unsigned_vote)), g, vote.signature)
 end
+
+# This function may become redundant with compressed encryption
+function isconsistent(opening::CastOpening{G}, vote::VoteEnvelope{G}, hasher::HashSpec, key::Integer) where G <: Group
+
+    (; gz, pkw) = vote
+
+    # decoy tracker
+    (; θ, λ) = opening.decoy
+    (θ, λ) == compute_tracker_preimage(gz^key, hasher) || return false
+
+    # main tracker
+    tracker_seed = pkw^key
+    opening.opening.tracker == TrackerOpening(2:order(G)-1; roprg = gen_roprg(octet(tracker_seed))) || return false
+
+    return true
+end
+
+
+function extract_opening(vote::VoteEnvelope{G}, proposal::Proposal{G}, verifier::Verifier, sk::Integer) where G <: Group
+
+    # Here I can also obtain the relevant key 
+    
+    key = decap(vote.opening.encapsulation, sk) # The key used for encryption
+    cast_opening = decrypt(vote.opening, sk, proposal.encrypt_spec; key)
+
+    δ = rand(PRG(proposal.hasher, [octet(vote.R0); key]), 2:order(G)-1)
+    (; R) = cast_opening.record.signature.proof
+    (; R0) = vote
+    (; g) = proposal
+    @check R/R0 == g^δ "Witness of the signature not sufficiently randomized"
+
+    @check isconsistent(cast_opening, vote, proposal.hasher, sk) "Leakage channel detected"
+    @check isbinding(vote.C, cast_opening, proposal.basis.h) "Cast opening and cast commitment are not binding"
+    @check isconsistent(cast_opening, proposal, verifier) "Cast opening is not consistent"
+
+    return cast_opening
+end
+
+
 
 # auxilary data that enables delivery device to be sure that identity commitment will appear on the buletin board
 struct VoteContext{G} 
@@ -204,22 +245,30 @@ end
 function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Integer, pin::Int; inherit_challenge=false, roprg = gen_roprg()) where G <: Group
 
     if pin == voter.pin
-        
-        encoded_selection = selection
-        coerced_vote = DecoyOpening()
 
+        decoy_selection = 0
+        encoded_selection = selection
+        
+        z = compute_decoy_tracker_seed(voter.proposal, int2octet(voter.key))
+        
     elseif pin in (i.pin for i in voter.decoys)
 
+        decoy_selection = selection
         encoded_selection = voter.current_selection[]
+
         N = findlast(i -> i.pin == pin, voter.decoys)
-        coerced_vote = DecoyOpening(voter.proposal, selection, voter.decoys[N].seed)
+        z = compute_decoy_tracker_seed(voter.proposal, voter.decoys[N].seed)
 
     else
 
         error("Invalid pin code")
 
     end
-        
+
+    (; collector, hasher, g) = voter.proposal
+    decoy_vote = DecoyOpening(hasher, decoy_selection, collector ^ z)
+    gz = g^z # generator element used by buletin board to derive decoy seed
+
     C, A, sup_opening = TallyProofs.recommit!(voter.supersession, chg; roprg = gen_roprg(roprg(:supersession))) 
     (; β, history, ux, pok) = sup_opening
 
@@ -234,17 +283,24 @@ function assemble_vote!(voter::VotingCalculator{G}, selection::Integer, chg::Int
     (; hasher) = voter.proposal
     I = commitment(seed(π_w), id, hasher)
 
-    signed_vote_commitment = CastRecord(proposal_hash, ux, vote_commitment, I, pok, signer)
+    k_BB = encap(voter.proposal.g, voter.proposal.collector)
 
-    cast_opening = CastOpening(β, history, signed_vote_commitment, vote_opening, coerced_vote, voter.π_t)
+    r0 = rand(roprg(:r0), 2:order(G) - 1)
+    R0 = g^r0
+    δ = rand(PRG(hasher, [octet(R0); decap(k_BB)]), 2:order(G)-1)
 
-    cast_opening_enc = encrypt(cast_opening, voter.proposal.g, voter.proposal.collector, voter.proposal.encrypt_spec)
+    cast_record = CastRecord(proposal_hash, ux, vote_commitment, I, pok, signer; r = r0 + δ)
+
+    cast_opening = CastOpening(β, history, cast_record, vote_opening, decoy_vote)
+
+    cast_opening_enc = encrypt(cast_opening, k_BB, voter.proposal.encrypt_spec)
 
     voter.current_selection[] = encoded_selection
+        
+    pkw = voter.pseudonym ^ π_w.s
+    vote = VoteEnvelope(proposal_hash, C, cast_opening_enc, pkw, gz, R0, signer)
 
-    vote = VoteEnvelope(proposal_hash, C, cast_opening_enc, signer)
+    vote_context = VoteContext(vote, A, id, π_w)
 
-    vote_envelope = VoteContext(vote, A, id, π_w)
-
-    return vote_envelope
+    return vote_context
 end

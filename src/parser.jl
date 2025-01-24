@@ -80,23 +80,26 @@ function Base.convert(::Type{DecoyOpening}, tree::Tree)
     return DecoyOpening(θ, λ, selection)
 end
 
-Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.record, Tree(c.opening, L), Tree(c.decoy, L), c.π_t))
+#Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.record, Tree(c.opening, L), Tree(c.decoy, L), c.π_t))
+Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.record, Tree(c.opening, L), Tree(c.decoy, L)))
 Parser.Tree(c::CastOpening{G}) where G <: Group = Tree(c, ndigits(order(G), base=256))
 
 function Base.convert(::Type{CastOpening{G}}, tree::Tree) where G <: Group
-    β, history, record, opening, decoy, π_t = convert(Tuple{BigInt, Vector{BigInt}, CastRecord{G}, VoteOpening, DecoyOpening, SchnorrProof{G}}, tree)
-    return CastOpening(β, history, record, opening, decoy, π_t)
+    #β, history, record, opening, decoy, π_t = convert(Tuple{BigInt, Vector{BigInt}, CastRecord{G}, VoteOpening, DecoyOpening, SchnorrProof{G}}, tree)
+    β, history, record, opening, decoy = convert(Tuple{BigInt, Vector{BigInt}, CastRecord{G}, VoteOpening, DecoyOpening}, tree)
+    #return CastOpening(β, history, record, opening, decoy, π_t)
+    return CastOpening(β, history, record, opening, decoy)
 end
 
 function Parser.Tree(v::VoteEnvelope{G}) where G <: Group
     if isnothing(v.signature)
-        return Tree((v.proposal, v.C, v.opening))
+        return Tree((v.proposal, v.C, v.opening, v.pkw, v.gz, v.R0))
     else
-        return Tree((v.proposal, v.C, v.opening, v.signature))
+        return Tree((v.proposal, v.C, v.opening, v.pkw, v.gz, v.R0, v.signature))
     end
 end
 
 function Base.convert(::Type{VoteEnvelope{G}}, tree::Tree) where G <: Group
-    proposal_leaf, C, opening, signature = convert(Tuple{Leaf, G, Encryption{CastOpening{G}, G}, Signature{G}}, tree)
-    return VoteEnvelope(proposal_leaf.x, C, opening, signature)
+    proposal_leaf, C, opening, pkw, gz, R0, signature = convert(Tuple{Leaf, G, Encryption{CastOpening{G}, G}, G, G, G, Signature{G}}, tree)
+    return VoteEnvelope(proposal_leaf.x, C, opening, pkw, gz, R0, signature)
 end
