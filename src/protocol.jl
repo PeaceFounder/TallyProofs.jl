@@ -75,6 +75,7 @@ end
 Base.:(==)(x::DecoyOpening, y::DecoyOpening) = x.θ == y.θ && x.λ == y.λ && x.selection == y.selection
 
 struct Proposal{G <: Group} 
+    pid::Int # A simple reference
     spec::Vector{UInt8} # hash of other set of parameters
     g::G
     collector::G
@@ -85,14 +86,16 @@ struct Proposal{G <: Group}
     hasher::HashSpec
 end
 
-function Proposal(g::G, collector::G, verifier::Verifier; spec = UInt8[], watermark_nbits::Int=4, token_max::Int=9999_9999, encrypt_spec::EncryptSpec=AES256_SHA256(), hasher = verifier.prghash) where G <: Group
+function Proposal(pid::Integer, g::G, collector::G, verifier::Verifier; spec = UInt8[], watermark_nbits::Int=4, token_max::Int=9999_9999, encrypt_spec::EncryptSpec=AES256_SHA256(), hasher = verifier.prghash) where G <: Group
     
     # For safety reasons we shall derive both generators independently and not reuse g
     h, d = generator_basis(verifier, G, 2)
     basis = GeneratorSetup(h, d)
     
-    return Proposal(spec, g, collector, basis, watermark_nbits, token_max, encrypt_spec, hasher)
+    return Proposal(pid, spec, g, collector, basis, watermark_nbits, token_max, encrypt_spec, hasher)
 end
+
+Base.:(==)(x::T, y::T) where T <: Proposal = x.pid == y.pid && x.spec == y.spec && x.g == y.g && x.collector == y.collector && x.basis == y.basis && x.watermark_nbits == y.watermark_nbits && x.token_max == y.token_max && x.encrypt_spec == y.encrypt_spec && x.hasher == y.hasher
 
 function compute_decoy_tracker_seed(proposal::Proposal{G}, seed::Vector{UInt8}) where G <: Group
 
@@ -135,17 +138,10 @@ function verify_watermark(proposal::Proposal{G}, ux::G, token::Integer, hasher::
     return verify_watermark(token - offset, nbits, octet(ux), hasher; num_positions = watermark_nbits)    
 end
 
-# function DecoyOpening(proposal::Proposal{G}, selection::Integer, seed::Vector{UInt8}) where G <: Group
-#     θ, λ = compute_tracker_preimage(proposal, seed)
-#     return DecoyOpening(θ, λ, selection)
-# end
-
 function DecoyOpening(hasher::HashSpec, selection::Integer, decoy_seed::G) where G <: Group
     θ, λ = compute_tracker_preimage(decoy_seed, hasher)
     return DecoyOpening(θ, λ, selection)
 end
-
-
 
 struct CastRecord{G <: Group}
     proposal::Vector{UInt8} # hash
@@ -191,7 +187,6 @@ struct CastOpening{G <: Group}
     record::CastRecord{G}
     opening::VoteOpening # opening -> vote
     decoy::DecoyOpening
-    #π_t::SchnorrProof{G}
 end
 
 # verifiable_seed

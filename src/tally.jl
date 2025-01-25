@@ -205,7 +205,6 @@ function extract_decoy_votes(cast_openings)
         return (octet(pseudonym), θ, λ) # need to add hash for CryptoGroups
     end
 
-    #decoys = [i.decoy for i in @view(cast_openings[indicies]) if !iszero(i.decoy)]
     decoys = [i.decoy for i in @view(cast_openings[indicies]) if !iszero(i.decoy.selection)]
 
     return decoys

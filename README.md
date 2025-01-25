@@ -22,7 +22,7 @@ The system combines three innovative security mechanisms:
 
 The package can be added to your Julia environment:
 
-```julia
+```julia{skip=true}
 using Pkg
 Pkg.add("https://github.com/PeaceFounder/TallyProofs.jl")
 ```
@@ -45,7 +45,6 @@ While implementing these additional components involves primarily standard softw
 ### Setup and Initialization
 
 ```julia
-using Test
 using CryptoGroups
 using SigmaProofs.Verificatum: ProtocolSpec
 using TallyProofs
@@ -60,19 +59,19 @@ tallier_key = 453
 cast_openings = CastOpening{G}[]
 
 # Public Bulletin Board
-proposal = Proposal(g, g^tallier_key, verifier; token_max=999)
+pid = 1 # proposal identifier
+proposal = Proposal(pid, g, g^tallier_key, verifier; token_max=999)
 members = G[]
 cast_commitments = G[]
 
 # Tallier Controller
 function record_vote!(vote)
     alias = findfirst(isequal(vote.signature.pbkey), members)
-    @test !isnothing(alias) #"Voter is not a registered member"
+    @assert !isnothing(alias) "Voter is not a registered member"
+    @assert verify(vote, proposal.g) "Signature on the vote envelope invalid"
 
-    cast_opening = decrypt(vote.opening, tallier_key, proposal.encrypt_spec)
-    @test isbinding(vote.C, cast_opening, proposal.basis.h)
-    @test isconsistent(cast_opening, proposal, verifier)
-    @test isconsistent(cast_openings, cast_opening)
+    cast_opening = extract_opening(vote, proposal, verifier, tallier_key)
+    @assert isconsistent(cast_openings, cast_opening) "Cast opening inconsistent with previous cast"
 
     push!(cast_commitments, vote.C)
     push!(cast_openings, cast_opening)
@@ -89,11 +88,11 @@ The tallying authority maintains the election private key and manages cast vote 
 
 ```julia
 # Registration
-alice = VotingCalculator(b"Alice", proposal, verifier, 1234) 
-bob = VotingCalculator(b"Bob", proposal, verifier, 5678)
-eve = VotingCalculator(b"Eve", proposal, verifier, 4321)
+alice = VotingCalculator(b"Alice", g, verifier, 1234) 
+bob = VotingCalculator(b"Bob", g, verifier, 5678)
+eve = VotingCalculator(b"Eve", g, verifier, 4321)
 
-append!(members, [alice.pseudonym, bob.pseudonym, eve.pseudonym]) # registration
+append!(members, [g^i.key for i in [alice, bob, eve]]) # registration
 ```
 
 During registration, each voter receives a voting calculator that generates a secret key using randomness from both the device and additional sources chosen by the voter. This multi-source randomness generation prevents a compromised vendor from breaking vote anonymity through predetermined randomness.
@@ -104,20 +103,20 @@ Voters set a PIN code on their calculator which is used for vote sealing, tracke
 
 ```julia
 # Voting Device Controller
-function cast_vote!(voter, selection, pin)
+function cast_vote!(voter, proposal, selection, pin)
     chg = rand(2:order(G)-1)
-    context = assemble_vote!(voter, selection, chg, pin)
-    @test isconsistent(context, chg, g, voter.hasher, voter.verifier)
+    context = assemble_vote!(voter, proposal, selection, chg, pin)
+    @assert isconsistent(context, chg, g, voter.hasher, voter.verifier) "Vote is not correctly formed"
     alias, cast_index = record_vote!(context.vote)
     
     return CastReceipt(alias, context.id, seed(context.π_w))
 end
 
 # Vote Casting
-alice_receipt = cast_vote!(alice, 3, alice.pin)
-bob_receipt = cast_vote!(bob, 4, bob.pin)
-eve_receipt = cast_vote!(eve, 6, eve.pin)
-bob_receipt = cast_vote!(bob, 1, bob.pin) # anyone can revote
+alice_receipt = cast_vote!(alice, proposal, 3, alice.pin)
+bob_receipt = cast_vote!(bob, proposal, 4, bob.pin)
+eve_receipt = cast_vote!(eve, proposal, 6, eve.pin)
+bob_receipt = cast_vote!(bob, proposal, 1, bob.pin) # anyone can revote
 ```
 
 The vote casting process demonstrates the system's core security features. The voting device interfaces with the calculator to construct an encrypted and signed vote. Before submission, the device verifies the cast commitment will bind the bulletin board to publish a vote commitment next to the voter's identity commitment. This enables accountability for vote recording without requiring trust in the calculator.
@@ -129,14 +128,14 @@ The system supports deniable revoting, as shown when Bob updates his vote. This 
 ```julia
 # Universal Verifiability
 simulator = tally(proposal, cast_commitments, cast_openings, verifier)
-@test verify(simulator)
+@assert verify(simulator) "Integrity audit has failed"
 
 # Individual Verifiability
-@test alice_receipt.id == b"Alice" 
+@assert alice_receipt.id == b"Alice" "Cast receipt is not owned"
 alice_token = get_token(simulator.proposition, members, alice_receipt, proposal.hasher)
-alice_tracker = compute_tracker(alice, alice_token, alice.pin)
+alice_tracker = compute_tracker(alice, pid, alice_token, alice.pin)
 N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally)
-@test simulator.proposition.tally[N].selection == 3
+@assert simulator.proposition.tally[N].selection == 3 "Vote is not cast as intended"
 
 # Counting of the votes
 count_votes(simulator.proposition)
@@ -156,7 +155,7 @@ The system supports the addition of decoy votes to the tally board by listing vo
 
 ```julia
 decoy_pin = 2341
-eve_seed = create_decoy_credential!(eve, decoy_pin, pin)
+eve_seed = create_decoy_credential!(eve, decoy_pin, 4321)
 ```
 
 The decoy_pin functions like a regular PIN code, allowing all standard operations including creating additional decoy credentials. When creating a decoy credential, the voter receives a secret seed that determines tracker preimage parameters θ, λ. These parameters can be derived once the proposal is known, enabling tracker computation on an external device after the vote without compromising verifiability:
@@ -174,7 +173,7 @@ The system's coercion resistance mechanisms would be ineffective against in-pers
 To address this, the system implements a tracker override mechanism. After verifying their vote with the correct tracker challenge, voters can override the tracker with their preferred vote from the tally board. When the correct tracker challenge is entered, this overridden vote is displayed instead.
 
 ```julia
-install_decoy_tracker!(eve, decoy_tracker, decoy_pin)
+install_decoy_tracker!(eve, pid, decoy_tracker, decoy_pin)
 ```
 
 To prevent coercers from checking just before voting closes (ensuring they're first to input the tracker challenge), the system releases the tally board with decoy tracker challenges first. This allows voters to select their chosen tracker and set it up, preferably using a decoy credential. The tracker challenges are watermarked with bits from a shared secret, enabling the calculator to identify correct challenges and display the override tracker consistently.

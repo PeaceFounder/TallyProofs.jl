@@ -1,4 +1,3 @@
-using Test
 using CryptoGroups
 using SigmaProofs.Verificatum: ProtocolSpec
 using TallyProofs
@@ -12,66 +11,61 @@ verifier = ProtocolSpec(; g)
 tallier_key = 453
 cast_openings = CastOpening{G}[]
 
-# Public Buletin Board
-proposal = Proposal(g, g^tallier_key, verifier; token_max=999)
+# Public Bulletin Board
+pid = 1 # proposal identifier
+proposal = Proposal(pid, g, g^tallier_key, verifier; token_max=999)
 members = G[]
 cast_commitments = G[]
 
 # Tallier Controller
 function record_vote!(vote)
-
     alias = findfirst(isequal(vote.signature.pbkey), members)
-    @test !isnothing(alias) #"Voter is not a registered member"
+    @assert !isnothing(alias) "Voter is not a registered member"
+    @assert verify(vote, proposal.g) "Signature on the vote envelope invalid"
 
-    cast_opening = decrypt(vote.opening, tallier_key, proposal.encrypt_spec)
-    @test isbinding(vote.C, cast_opening, proposal.basis.h)
-    @test isconsistent(cast_opening, proposal, verifier)
-
-    @test isconsistent(cast_openings, cast_opening)
+    cast_opening = extract_opening(vote, proposal, verifier, tallier_key)
+    @assert isconsistent(cast_openings, cast_opening) "Cast opening inconsistent with previous cast"
 
     push!(cast_commitments, vote.C)
     push!(cast_openings, cast_opening)
 
-    cast_index = length(cast_commitments)
-    
-    return alias, cast_index
+    return alias, length(cast_commitments)
 end
 
-# Voting Device Controller
-function cast_vote!(voter, selection, pin)
+# Registration
+alice = VotingCalculator(b"Alice", g, verifier, 1234) 
+bob = VotingCalculator(b"Bob", g, verifier, 5678)
+eve = VotingCalculator(b"Eve", g, verifier, 4321)
 
+append!(members, [g^i.key for i in [alice, bob, eve]]) # registration
+
+# Voting Device Controller
+function cast_vote!(voter, proposal, selection, pin)
     chg = rand(2:order(G)-1)
-    context = assemble_vote!(voter, selection, chg, pin; inherit_challenge=false)
-    @test isconsistent(context, chg, g, voter.hasher, voter.verifier)
+    context = assemble_vote!(voter, proposal, selection, chg, pin)
+    @assert isconsistent(context, chg, g, voter.hasher, voter.verifier) "Vote is not correctly formed"
     alias, cast_index = record_vote!(context.vote)
-    # cast_index is kept by the voting device for locting cast commitment on the buletin board
     
     return CastReceipt(alias, context.id, seed(context.π_w))
 end
 
-# Registration
-alice = VotingCalculator(b"Alice", proposal, verifier, 1234) 
-bob = VotingCalculator(b"Bob", proposal, verifier, 5678)
-eve = VotingCalculator(b"Eve", proposal, verifier, 4321)
-
-append!(members, [alice.pseudonym, bob.pseudonym, eve.pseudonym]) # registration
-
 # Vote Casting
-alice_receipt = cast_vote!(alice, 3, alice.pin)
-bob_receipt = cast_vote!(bob, 4, bob.pin)
-eve_receipt = cast_vote!(eve, 6, eve.pin)
-bob_receipt = cast_vote!(bob, 0, bob.pin) # anyone can revote
+alice_receipt = cast_vote!(alice, proposal, 3, alice.pin)
+bob_receipt = cast_vote!(bob, proposal, 4, bob.pin)
+eve_receipt = cast_vote!(eve, proposal, 6, eve.pin)
+bob_receipt = cast_vote!(bob, proposal, 1, bob.pin) # anyone can revote
+
 
 # Universal Verifiability
 simulator = tally(proposal, cast_commitments, cast_openings, verifier)
-@test verify(simulator)
+@assert verify(simulator) "Integrity audit has failed"
 
 # Individual Verifiability
-@test alice_receipt.id == b"Alice" 
+@assert alice_receipt.id == b"Alice" "Cast receipt is not owned"
 alice_token = get_token(simulator.proposition, members, alice_receipt, proposal.hasher)
-alice_tracker = compute_tracker(alice, alice_token, alice.pin) # this is a hash of the tracker
+alice_tracker = compute_tracker(alice, pid, alice_token, alice.pin)
 N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally)
-@test simulator.proposition.tally[N].selection == 3
+@assert simulator.proposition.tally[N].selection == 3 "Vote is not cast as intended"
 
 # Counting of the votes
 count_votes(simulator.proposition)

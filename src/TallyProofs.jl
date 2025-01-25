@@ -14,9 +14,7 @@ function gen_roprg(ρ::AbstractVector{UInt8})
 end
 
 gen_roprg() = gen_roprg(rand(RandomDevice(), UInt8, 32))
-
 gen_roprg(prg::PRG) = gen_roprg(prg.s)
-
 
 include("watermark.jl")
 include("kem.jl")
@@ -29,12 +27,11 @@ include("protocol.jl")
 include("tally.jl")
 include("calculator.jl")
 
-
 include("extra.jl")
 include("parser.jl")
 
-
 export Proposal, CastOpening, tally, verify, count_votes, isconsistent, isbinding
-export VotingCalculator, assemble_vote!, get_token, compute_tracker, decrypt, CastReceipt, seed
+export VotingCalculator, assemble_vote!, get_token, compute_tracker, extract_opening, CastReceipt, seed
+export create_decoy_credential!, install_decoy_tracker! # coercion resistance toolbox
 
 end

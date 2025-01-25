@@ -7,8 +7,6 @@ import SigmaProofs: prove, verify, proof_type
 struct GeneratorSetup{G <: Group}
     h::G # blinding generator
     g::G
-    #d::G # tracker generator
-    #o::G
 end
 
 Base.:(==)(x::T, y::T) where T <: GeneratorSetup = x.h == y.h && x.g == y.g
