@@ -3,7 +3,7 @@ using TallyProofs
 using CryptoGroups
 using SigmaProofs
 using SigmaProofs.Verificatum: generator_basis
-import TallyProofs: ReCommit, SupersessionCalculator, check_challenge, supersess, verify, trim
+import TallyProofs: SuccessionOpening, SupersessionCalculator, check_challenge, supersess, verify, trim
 
 G = @ECGroup{P_192}
 g = G()
@@ -16,7 +16,7 @@ prghash = verifier.prghash
 C_vec = G[]
 A_vec = G[]
 
-recommits = ReCommit{G}[]
+recommits = SuccessionOpening{G}[]
 
 function recommit!(calc, chg)
 

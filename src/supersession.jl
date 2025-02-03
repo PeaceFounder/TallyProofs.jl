@@ -16,7 +16,7 @@ function trim(arr)
     return @view arr[1:last_nonzero]
 end
 
-struct ReCommit{G <: Group}
+struct SuccessionOpening{G <: Group}
     β::BigInt
     u::G
     ux::G
@@ -75,7 +75,7 @@ function recommit!(calc::SupersessionCalculator{G}, chg::Integer; roprg = gen_ro
     
     pok = prove(LogKnowledge(u, ux), verifier, x′)
 
-    recommit = ReCommit(β, u, ux, copy(calc.history), pok)
+    recommit = SuccessionOpening(β, u, ux, copy(calc.history), pok)
 
     N = iszero(calc.history[1]) ? 0 : findlast(!iszero, calc.history)
     L = rand(roprg(:L), 1:calc.width)
@@ -202,7 +202,7 @@ function extract_maximum_mask(identifiers::Vector{<:Any}, values::Vector{Int})
     return mask
 end
 
-function extract_supersession(recommits::Vector{ReCommit{G}}) where G <: Group
+function extract_supersession(recommits::Vector{SuccessionOpening{G}}) where G <: Group
 
     u_vec = [r.u for r in recommits]
     width_vec = [length(trim(r.history)) for r in recommits]
@@ -210,7 +210,7 @@ function extract_supersession(recommits::Vector{ReCommit{G}}) where G <: Group
     return extract_maximum_mask(u_vec, width_vec)
 end
 
-function reduce_representation(recommits::Vector{ReCommit{G}}, u_vec::Vector{G}, ux_vec::Vector{G}, history::Vector{Vector{BigInt}}) where G <: Group
+function reduce_representation(recommits::Vector{SuccessionOpening{G}}, u_vec::Vector{G}, ux_vec::Vector{G}, history::Vector{Vector{BigInt}}) where G <: Group
     ψ_vec = Vector{Int}(undef, length(recommits))
     α_vec = Vector{BigInt}(undef, length(recommits))
 
@@ -240,7 +240,7 @@ end
 # replaced by newer ones. This operation is distinct from the relationship described by "supersede" - while one vote may supersede
 # another, the systematic process of identifying and handling all such relationships within a collection is what we term
 # "supersessing", filling a lexical gap in the technical vocabulary of cryptographic voting systems.
-function supersess(C::Vector{G}, h::G, recommits::Vector{ReCommit{G}}; mask = extract_supersession(recommits)) where G <: Group
+function supersess(C::Vector{G}, h::G, recommits::Vector{SuccessionOpening{G}}; mask = extract_supersession(recommits)) where G <: Group
 
     u = [r.u for r in @view(recommits[mask])]
     ux = [r.ux for r in @view(recommits[mask])]
@@ -249,7 +249,7 @@ function supersess(C::Vector{G}, h::G, recommits::Vector{ReCommit{G}}; mask = ex
     return Supersession(C, h, u, ux, pok)
 end
 
-function supersess(C::Vector{G}, h::G, recommits::Vector{ReCommit{G}}, verifier::Verifier) where G <: Group
+function supersess(C::Vector{G}, h::G, recommits::Vector{SuccessionOpening{G}}, verifier::Verifier) where G <: Group
 
     mask = extract_supersession(recommits)
     proposition = supersess(C, h, recommits; mask)

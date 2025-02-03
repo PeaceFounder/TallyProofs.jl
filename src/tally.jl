@@ -137,7 +137,7 @@ function reduce_representation(cast_openings::Vector{CastOpening{G}}, u::Vector{
     _history = (i.history for i in cast_openings)
     β = (i.β for i in cast_openings)
 
-    recommits = [ReCommit(βi, ui, uxi, historyi, poki) for (βi, ui, uxi, historyi, poki) in zip(β, _u, _ux, _history, pok)]
+    recommits = [SuccessionOpening(βi, ui, uxi, historyi, poki) for (βi, ui, uxi, historyi, poki) in zip(β, _u, _ux, _history, pok)]
 
     return reduce_representation(recommits, u, ux, history)
 end

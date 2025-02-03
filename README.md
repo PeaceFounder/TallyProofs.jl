@@ -2,21 +2,20 @@
 
 ![](docs/assets/setup.webp)
 
-TallyProofs.jl implements the cryptographic core of a novel electronic voting system that achieves both coercion resistance and end-to-end verifiability. The system's key innovation is its post-cast isolation approach - voters use a secure calculator device that remains offline between vote casting and verification phases. This design enables voters to verify their votes while maintaining privacy and coercion resistance without requiring complex threshold ceremonies or trust in multiple parties.
+TallyProofs.jl implements the cryptographic core of a novel electronic voting system that achieves both coercion resistance and end-to-end verifiability. The system's key innovation is its post-cast isolation approach - voters use a calculator device that remains offline between vote casting and verification phases. This design enables voters to verify their votes while maintaining privacy and coercion resistance without requiring complex threshold ceremonies or trust in multiple parties.
 
 The system combines three innovative security mechanisms:
-1. A deniable revoting protocol using supersession commitments, which allows voters to update their votes without detection while enforcing the bulletin board to reveal the last cast vote
+1. A deniable revoting protocol using cast commitments, which allows voters to update their votes without detection while enforcing the bulletin board to reveal the last cast vote
 2. A tracker generation system where each voter receives their unique challenge derived from all cast votes, which prevents both tracker prediction before vote closing and prevents an isolated voting calculator from computing any voter's tracker except its own
 3. A generator commitment scheme that binds the bulletin board to publish voter's identity commitment next to their vote commitment by encoding it into the generator seed, enabling voters to prove ownership of their used pseudonym and keep their voting device accountable for vote recording without trusting the voting calculator
 
 ## Features
 
-- End-to-end verifiability without trusting election authorities
-- Coercion resistance through deniable revoting and fake credentials
+- End-to-end verifiability with unconditional individual verifiability
+- Coercion resistance through deniable revoting and decoy credentials
 - Everlasting privacy via perfectly hiding commitments
-- Linear-time vote tallying with instant results
+- Linear complexity vote tallying with instant results
 - Support for vote supersession with paper ballots
-- Verifiable exclusion of compromised keys
 
 ## Installation
 
@@ -80,7 +79,7 @@ function record_vote!(vote)
 end
 ```
 
-We use the P_192 elliptic curve group from CryptoGroups for this demonstration. In a production environment, this could be replaced with OpenSSLGroups elliptic curves for significantly better performance. The system employs the Verificatum verifier specification for shuffle proofs, with additional proofs (Schnorr, Lambda Commitment, and Supersession) built on top following the specification's practices.
+We use the `P_192` elliptic curve group from CryptoGroups for this demonstration. In a production environment, this could be replaced with `OpenSSLGroups` elliptic curves for significantly better performance. The system employs the Verificatum verifier specification for shuffle proofs, with additional proofs (Schnorr, Lambda Commitment, and Supersession) built on top following the specification's practices.
 
 The tallying authority maintains the election private key and manages cast vote openings, while the public bulletin board stores the election proposal, member list, and vote commitments. The record_vote! function ensures that votes have valid openings and maintains the supersession protocol's integrity, which enforces the publication of the last cast vote. This design prevents vote omission while enabling deniable revoting, as cast commitments don't reveal voter identities.
 
