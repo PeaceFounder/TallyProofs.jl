@@ -1,6 +1,6 @@
 # TallyProofs.jl
 
-[![codecov](https://codecov.io/gh/PeaceFounder/ShuffleProofs.jl/graph/badge.svg?token=4VCLLS1YEF)](https://codecov.io/gh/PeaceFounder/TallyProofs.jl)
+[![codecov](https://codecov.io/gh/PeaceFounder/TallyProofs.jl/graph/badge.svg?token=4VCLLS1YEF)](https://codecov.io/gh/PeaceFounder/TallyProofs.jl)
 
 ![](docs/assets/setup.webp)
 
