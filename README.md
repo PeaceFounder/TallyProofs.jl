@@ -1,5 +1,7 @@
 # TallyProofs.jl
 
+[![codecov](https://codecov.io/gh/PeaceFounder/ShuffleProofs.jl/graph/badge.svg?token=4VCLLS1YEF)](https://codecov.io/gh/PeaceFounder/TallyProofs.jl)
+
 ![](docs/assets/setup.webp)
 
 TallyProofs.jl implements the cryptographic core of a novel electronic voting system that achieves both coercion resistance and end-to-end verifiability. The system's key innovation is its post-cast isolation approach - voters use a calculator device that remains offline between vote casting and verification phases. This design enables voters to verify their votes while maintaining privacy and coercion resistance without requiring complex threshold ceremonies or trust in multiple parties.
@@ -81,7 +83,7 @@ end
 
 We use the `P_192` elliptic curve group from CryptoGroups for this demonstration. In a production environment, this could be replaced with `OpenSSLGroups` elliptic curves for significantly better performance. The system employs the Verificatum verifier specification for shuffle proofs, with additional proofs (Schnorr, Lambda Commitment, and Supersession) built on top following the specification's practices.
 
-The tallying authority maintains the election private key and manages cast vote openings, while the public bulletin board stores the election proposal, member list, and vote commitments. The record_vote! function ensures that votes have valid openings and maintains the supersession protocol's integrity, which enforces the publication of the last cast vote. This design prevents vote omission while enabling deniable revoting, as cast commitments don't reveal voter identities.
+The tallying authority maintains the election private key and manages cast vote openings, while the public bulletin board stores the election proposal, member list, and vote commitments. The `record_vote!` function ensures that votes have valid openings and maintains the supersession protocol's integrity, which enforces the publication of the last cast vote. This design prevents vote omission while enabling deniable revoting, as cast commitments don't reveal voter identities.
 
 ### Registration 
 
@@ -195,8 +197,3 @@ To cite this work, please use:
 Erdmanis, J. (2025). *Unconditional Individual Verifiability with Coercion Resistance via Post-Cast Isolation.* Manuscript in preparation.
 
 The paper describing the system's cryptographic protocols and security mechanisms is currently in the draft stage and may change with a more thorough analysis. 
-
-
-
-
-

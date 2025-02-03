@@ -16,9 +16,7 @@ end
 function DecoyCommitment(opening::VoteOpening, setup::GeneratorSetup{<:Group})
 
     (; tracker, selection, γ) = opening
-
     @check γ == 0 "vote must be unblinded"
-
     Q, R = commitment(tracker, setup)
 
     return DecoyCommitment(Q, R, selection) 
