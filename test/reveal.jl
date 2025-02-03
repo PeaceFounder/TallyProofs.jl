@@ -48,5 +48,5 @@ simulator = reveal(setup, tracker_challenges, commitments, openings, verifier)
 
 # voter verifies their tracker
 alice_tracker = tracker(alice, tracker_challenges[1], order(setup.g))
-N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally)
-@test simulator.proposition.tally[N].selection == 2
+N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally_board)
+@test simulator.proposition.tally_board[N].selection == 2

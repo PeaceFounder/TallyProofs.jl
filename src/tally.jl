@@ -8,7 +8,7 @@ import SigmaProofs: prove, verify, proof_type
 using .HMACWatermark: apply_watermark
 
 struct DecoyCommitment{G <: Group}
-    Q::G # tracker commitment
+    Q::G
     R::G
     selection::BigInt
 end
@@ -53,7 +53,7 @@ end
 
 struct TallyProof{G <: Group} <: Proof
     supersession::SupersessionProof{G}
-    reveal::RevealShuffleProof{G}
+    reveal::TallyBoardProof{G}
 end
 
 proof_type(::Type{Tally{G}}) where G <: Group = TallyProof{G}
@@ -112,24 +112,19 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::V
     R_vec = [i.record.commitment.R for i in public_cast_openings]
     
     seed = token_seed(Q_vec, R_vec, hasher)
-    tokens = compute_tokens(seed, Q_vec, token_max, watermark_nbits, hasher)
-
-    tracker_challenges = tokens[skip_mask] #.|> BigInt
-
+    tracker_challenges = compute_tokens(seed, Q_vec, token_max, watermark_nbits, hasher)#[mask]
     decoy_challenge = decoy_token(seed, public_decoy_votes, hasher)
-
-    append!(tracker_challenges, (decoy_challenge for i in eachindex(dummy_votes)))
-    total_tracker_challenges = tracker_challenges
+    merged_tracker_challenges = append!(tracker_challenges[skip_mask], (decoy_challenge for i in eachindex(dummy_votes)))
     
     vote_openings = (i.opening for i in @view(public_cast_openings[skip_mask])) # added here
-    total_vote_openings = Iterators.flatten((vote_openings, dummy_votes))
-    trackers = (tracker(opening, chg, order(proposal.g)) for (chg, opening) in zip(total_tracker_challenges, total_vote_openings))
+    merged_vote_openings = Iterators.flatten((vote_openings, dummy_votes))
+    trackers = (tracker(opening, chg, order(proposal.g)) for (chg, opening) in zip(merged_tracker_challenges, merged_vote_openings))
 
-    tally = TallyRecord[TallyRecord(Ti, octet2int(hasher(int2octet(Ti))[1:8]), opening.selection) for (Ti, opening) in zip(trackers, total_vote_openings)]
+    tally = TallyRecord[TallyRecord(Ti, octet2int(hasher(int2octet(Ti))[1:8]), opening.selection) for (Ti, opening) in zip(trackers, merged_vote_openings)]
 
     vote_commitments = [i.record for i in public_cast_openings]
 
-    return Tally(proposal, cast_commitments, vote_commitments, skip_list, public_decoy_votes, decoy_challenge, tokens, tally)
+    return Tally(proposal, cast_commitments, vote_commitments, skip_list, public_decoy_votes, decoy_challenge, tracker_challenges, tally)
 end
 
 function reduce_representation(cast_openings::Vector{CastOpening{G}}, u::Vector{G}, ux::Vector{G}, history::Vector{Vector{BigInt}}, hasher::HashSpec) where G <: Group
@@ -183,19 +178,19 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_openings::Vector{
 
     tracker_challenges = proposition.tracker_challenges[skip_mask]
     coercion_tracker_challenges = (proposition.decoy_challenge for i in eachindex(proposition.decoy_votes))
-    total_tracker_challenges = collect(BigInt, Iterators.flatten((tracker_challenges, coercion_tracker_challenges)))
+    merged_tracker_challenges = collect(BigInt, Iterators.flatten((tracker_challenges, coercion_tracker_challenges)))
     
     vote_commitments = (i.commitment for i in @view(proposition.cast_records[skip_mask]))
     dummy_vote_commitments = (commitment(i, proposition.proposal.basis) for i in dummy_votes)
-    total_vote_commitments = collect(VoteCommitment{G}, Iterators.flatten((vote_commitments, dummy_vote_commitments)))
+    merged_vote_commitments = collect(VoteCommitment{G}, Iterators.flatten((vote_commitments, dummy_vote_commitments)))
     
-    reveal_proposition = RevealShuffle(proposition.proposal.basis, total_tracker_challenges, total_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally_board])
+    reveal_proposition = TallyBoard(proposition.proposal.basis, merged_tracker_challenges, merged_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally_board])
 
     vote_openings = (i.opening for i in @view(cast_openings[mask][skip_mask]))
 
-    total_vote_openings = collect(VoteOpening, Iterators.flatten((vote_openings, dummy_votes)))
+    merged_vote_openings = collect(VoteOpening, Iterators.flatten((vote_openings, dummy_votes)))
 
-    reveal_proof = prove(reveal_proposition, verifier, total_vote_openings, 𝛙_reveal; roprg = gen_roprg(roprg(:reveal)))    
+    reveal_proof = prove(reveal_proposition, verifier, merged_vote_openings, 𝛙_reveal; roprg = gen_roprg(roprg(:reveal)))    
 
     return TallyProof(supersession_proof, reveal_proof)
 end
@@ -275,7 +270,7 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     reveal_vote_commitments = [i.commitment for i in @view(cast_records[skip_mask])]
     append!(reveal_vote_commitments, (commitment(i, proposition.proposal.basis) for i in proposition.decoy_votes))
 
-    reveal_proposition = RevealShuffle(proposition.proposal.basis, tracker_challenges, reveal_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally_board])
+    reveal_proposition = TallyBoard(proposition.proposal.basis, tracker_challenges, reveal_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally_board])
 
     verify(reveal_proposition, proof.reveal, verifier) || return false
 

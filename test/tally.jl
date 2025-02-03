@@ -168,16 +168,20 @@ let
     @test hits <= 64
 end
 
-println("\nTally Board:\n")
+if isinteractive()
 
-for i in simulator.proposition.tally_board
-    (; display_tracker, selection) = i
-    short_tracker = div(display_tracker, 10^12)
-    println("$(lpad(short_tracker, 9)) : $selection")
-end
+    println("\nTally Board:\n")
 
-println("\nTally Count:\n")
+    for i in simulator.proposition.tally_board
+        (; display_tracker, selection) = i
+        short_tracker = div(display_tracker, 10^12)
+        println("$(lpad(short_tracker, 9)) : $selection")
+    end
 
-for (key, count) in count_votes(simulator.proposition)
-    println("$(lpad(key, 4)) : $count")
+    println("\nTally Count:\n")
+
+    for (key, count) in count_votes(simulator.proposition)
+        println("$(lpad(key, 4)) : $count")
+    end
+
 end

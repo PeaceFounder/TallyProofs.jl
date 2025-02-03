@@ -39,7 +39,7 @@ function extract_examples(markdown_file)
 end
 
 
-@safetestset "Token Watermark" begin
+@safetestset "Watermarks" begin
     include("watermark.jl")
 end
 
@@ -47,11 +47,11 @@ end
     include("supersession.jl")
 end
 
-@safetestset "Reveal Shuffle" begin
+@safetestset "TallyBoard" begin
     include("reveal.jl")
 end
 
-@safetestset "Tally Proofs" begin
+@safetestset "Tally" begin
     include("tally.jl")
 end
 
@@ -59,6 +59,6 @@ end
     include("example.jl")
 end
 
-@safetestset "README examples" begin
+@safetestset "README" begin
     Main.extract_examples(joinpath(dirname(@__DIR__), "README.md"))
 end

@@ -12,8 +12,8 @@ end
 Base.:(==)(x::T, y::T) where T <: GeneratorSetup = x.h == y.h && x.g == y.g
 
 struct VoteCommitment{G <: Group}
-    Q::G # tracker commitment
-    R::G # vote commitment with tracker blinding generator
+    Q::G
+    R::G
     V::G
 end
 
@@ -117,23 +117,23 @@ function vote_commitment(record::VoteRecord, setup::GeneratorSetup{G}) where {G 
     return V
 end
 
-struct RevealShuffle{G <: Group} <: Proposition
+struct TallyBoard{G <: Group} <: Proposition
     setup::GeneratorSetup{G}
     tracker_challenges::Vector{BigInt}
     vote_commitments::Vector{VoteCommitment{G}} 
-    tally::Vector{VoteRecord} 
+    tally_board::Vector{VoteRecord} 
 end
 
-Base.length(proposition::RevealShuffle) = length(proposition.vote_commitments)
+Base.length(proposition::TallyBoard) = length(proposition.vote_commitments)
 
-Base.permute!(proposition::RevealShuffle, ψ::Vector{Int}) = permute!(proposition.tally, ψ)
+Base.permute!(proposition::TallyBoard, ψ::Vector{Int}) = permute!(proposition.tally_board, ψ)
 
-struct RevealShuffleProof{G <: Group} <: Proof
+struct TallyBoardProof{G <: Group} <: Proof
     shuffle::PoSProof{G, 2} # I will need to upgrade this to 2
     trackers::Vector{LambdaProof{G}}
 end
 
-proof_type(::Type{RevealShuffle{G}}) where {G <: Group} = RevealShuffleProof{G}
+proof_type(::Type{TallyBoard{G}}) where {G <: Group} = TallyBoardProof{G}
 
 function tracker(θ::Integer, λ::Integer, chg::Integer, order::Integer)
     t = θ + λ * chg
@@ -153,14 +153,14 @@ function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vo
     
     tally = VoteRecord[VoteRecord(tracker(opening, chg, order(G)), opening.selection) for (chg, opening) in zip(tracker_challenges, vote_openings)]
 
-    return RevealShuffle(setup, tracker_challenges, vote_commitments, tally)
+    return TallyBoard(setup, tracker_challenges, vote_commitments, tally)
 end
 
 function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vote_commitments::Vector{VoteCommitment{G}}, vote_openings::Vector{<:VoteOpening}, verifier::Verifier; roprg = gen_roprg()) where G <: Group
 
     proposition = reveal(setup, tracker_challenges, vote_commitments, vote_openings)
     
-    𝛙 = sortperm(proposition.tally, by = x -> x.tracker)
+    𝛙 = sortperm(proposition.tally_board, by = x -> x.tracker)
     permute!(proposition, 𝛙)
 
     proof = prove(proposition, verifier, vote_openings, 𝛙; roprg)
@@ -168,9 +168,9 @@ function reveal(setup::GeneratorSetup{G}, tracker_challenges::Vector{BigInt}, vo
     return Simulator(proposition, proof, verifier)
 end
 
-function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_openings::AbstractVector{<:VoteOpening}, 𝛙::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
+function prove(proposition::TallyBoard{G}, verifier::Verifier, vote_openings::AbstractVector{<:VoteOpening}, 𝛙::Vector{<:Integer}; roprg = gen_roprg()) where G <: Group
 
-    (; setup, tally, tracker_challenges, vote_commitments) = proposition
+    (; setup, tally_board, tracker_challenges, vote_commitments) = proposition
     (; h, g) = proposition.setup
 
     𝐫T = [- i.tracker.β - i.tracker.α * ei for (i, ei) in zip(vote_openings, tracker_challenges)]
@@ -181,8 +181,8 @@ function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_openings:
     V_vec = (vote_commitment(com) for com in vote_commitments)
     𝐞 = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T_vec, V_vec)]
 
-    T′_vec = (tracker_commitment(votei, setup) for votei in tally)
-    V′_vec = (vote_commitment(votei, setup) for votei in tally)
+    T′_vec = (tracker_commitment(votei, setup) for votei in tally_board)
+    V′_vec = (vote_commitment(votei, setup) for votei in tally_board)
     𝐞′ = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T′_vec, V′_vec)]
     
     shuffle_proposition = Shuffle(h, h, 𝐞, 𝐞′)
@@ -196,21 +196,21 @@ function prove(proposition::RevealShuffle{G}, verifier::Verifier, vote_openings:
 
     lambda_proofs = [prove(LambdaCommitment(h, g, Qi), verifier, λi, αi; roprg = gen_roprg(roprg("$Qi"))) for (Qi, λi, αi) in zip(Q_vec, λ, α)]
     
-    return RevealShuffleProof(shuffle_proof, lambda_proofs)
+    return TallyBoardProof(shuffle_proof, lambda_proofs)
 end
 
 
-function verify(proposition::RevealShuffle{G}, proof::RevealShuffleProof{G}, verifier::Verifier) where G <: Group
+function verify(proposition::TallyBoard{G}, proof::TallyBoardProof{G}, verifier::Verifier) where G <: Group
 
-    (; setup, tally, tracker_challenges, vote_commitments) = proposition
+    (; setup, tally_board, tracker_challenges, vote_commitments) = proposition
     (; h, g) = proposition.setup
 
     T_vec = (tracker_commitment(com, chg) for (com, chg) in zip(vote_commitments, tracker_challenges))
     V_vec = (vote_commitment(com) for com in vote_commitments)
     𝐞 = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T_vec, V_vec)]
 
-    T′_vec = (tracker_commitment(votei, setup) for votei in tally)
-    V′_vec = (vote_commitment(votei, setup) for votei in tally)
+    T′_vec = (tracker_commitment(votei, setup) for votei in tally_board)
+    V′_vec = (vote_commitment(votei, setup) for votei in tally_board)
     𝐞′ = [ElGamalRow((Ti, Vi), (Ti, Vi)) for (Ti, Vi) in zip(T′_vec, V′_vec)]
 
     shuffle_proposition = Shuffle(h, h, 𝐞, 𝐞′)

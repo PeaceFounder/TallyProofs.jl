@@ -15,8 +15,7 @@ struct Signature{G <: Group}
 end
 
 function sign(message::Vector{UInt8}, g::G, key::BigInt; r = nothing) where G <: Group
-    # This is temporary
-    # we should however try to implement Scnorr signatures here according to specification
+    # This is temporary until Scnorr signature specification could be found
     verifier = ProtocolSpec(; g)
     
     pbkey = g^key
