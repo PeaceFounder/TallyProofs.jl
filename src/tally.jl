@@ -35,8 +35,8 @@ function commitment(vote::DecoyCommitment{G}, setup::GeneratorSetup{G}) where G 
 end
 
 struct TallyRecord
-    T::BigInt # the source
-    tracker::BigInt
+    raw_tracker::BigInt
+    display_tracker::BigInt
     selection::BigInt
 end
 
@@ -184,7 +184,7 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_openings::Vector{
     dummy_vote_commitments = (commitment(i, proposition.proposal.basis) for i in dummy_votes)
     total_vote_commitments = collect(VoteCommitment{G}, Iterators.flatten((vote_commitments, dummy_vote_commitments)))
     
-    reveal_proposition = RevealShuffle(proposition.proposal.basis, total_tracker_challenges, total_vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
+    reveal_proposition = RevealShuffle(proposition.proposal.basis, total_tracker_challenges, total_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally])
 
     vote_openings = (i.opening for i in @view(cast_openings[mask][skip_mask]))
 
@@ -225,7 +225,7 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::V
 
     proposition = tally(proposal, cast_commitments, cast_openings, hasher; skip_list, mask, dummy_votes)
 
-    𝛙 = sortperm(proposition.tally, by = x -> x.tracker) # this may also work with the added dummy votes
+    𝛙 = sortperm(proposition.tally, by = x -> x.display_tracker) # this may also work with the added dummy votes
     permute!(proposition.tally, 𝛙)
 
     proof = prove(proposition, verifier, cast_openings, 𝛙; mask, dummy_votes) 
@@ -282,7 +282,7 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     reveal_vote_commitments = [i.commitment for i in @view(vote_commitments[skip_mask])]
     append!(reveal_vote_commitments, (commitment(i, proposition.proposal.basis) for i in proposition.dummy_votes))
 
-    reveal_proposition = RevealShuffle(proposition.proposal.basis, tracker_challenges, reveal_vote_commitments, [VoteRecord(i.T, i.selection) for i in proposition.tally])
+    reveal_proposition = RevealShuffle(proposition.proposal.basis, tracker_challenges, reveal_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally])
 
     verify(reveal_proposition, proof.reveal, verifier) || return false
 

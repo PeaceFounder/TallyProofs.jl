@@ -100,17 +100,17 @@ simulator = tally(proposal, cast_commitments, cast_openings, verifier; skip_list
 alice_token = get_token(simulator.proposition, members, alice_receipt, hasher)
 alice_tracker = compute_tracker(alice, pid, alice_token, pin) # this is a hash of the tracker
 
-N = findfirst(x -> x.tracker == alice_tracker, simulator.proposition.tally)
+N = findfirst(x -> x.display_tracker == alice_tracker, simulator.proposition.tally)
 @test simulator.proposition.tally[N].selection == 3
 
 ted_token = get_token(simulator.proposition, members, ted_receipt, hasher)
 ted_tracker = compute_tracker(ted, pid, ted_token, pin) # this is a hash of the tracker
 
-N = findfirst(x -> x.tracker == ted_tracker, simulator.proposition.tally)
+N = findfirst(x -> x.display_tracker == ted_tracker, simulator.proposition.tally)
 @test isnothing(N)
 
 coercion_tracker = compute_tracker(proposal, eve_seed, simulator.proposition.coercion_token)
-N = findfirst(x -> x.tracker == coercion_tracker, simulator.proposition.tally)
+N = findfirst(x -> x.display_tracker == coercion_tracker, simulator.proposition.tally)
 @test !isnothing(N)
 @test simulator.proposition.tally[N].selection == 11
 
@@ -171,8 +171,8 @@ end
 println("\nTally Board:\n")
 
 for i in simulator.proposition.tally
-    (; tracker, selection) = i
-    short_tracker = div(tracker, 10^12)
+    (; display_tracker, selection) = i
+    short_tracker = div(display_tracker, 10^12)
     println("$(lpad(short_tracker, 9)) : $selection")
 end
 
