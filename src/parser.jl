@@ -51,13 +51,13 @@ function Base.convert(::Type{Signature{G}}, tree::Tree) where G <: Group
     return Signature(pbkey, proof)
 end
 
-Parser.Tree(proposal::Proposal) = Tree((proposal.pid, proposal.spec, proposal.g, proposal.collector, proposal.basis, proposal.watermark_nbits, proposal.token_max, string(nameof(typeof(proposal.encrypt_spec))), proposal.hasher.spec))
+Parser.Tree(proposal::Proposal) = Tree((proposal.pid, proposal.spec, proposal.g, proposal.collector, proposal.basis, proposal.watermark_nbits, proposal.challenge_max, string(nameof(typeof(proposal.encrypt_spec))), proposal.hasher.spec))
 
 
 function Base.convert(::Type{Proposal{G}}, tree::Tree) where G <: Group
-    pid, spec_leaf, g, collector, basis, watermark_nbits, token_max, encrypt_spec, hash_spec = convert(Tuple{Int, Leaf, G, G, GeneratorSetup{G}, Int, Int, String, String}, tree)
+    pid, spec_leaf, g, collector, basis, watermark_nbits, challenge_max, encrypt_spec, hash_spec = convert(Tuple{Int, Leaf, G, G, GeneratorSetup{G}, Int, Int, String, String}, tree)
 
-     return Proposal(pid, spec_leaf.x, g, collector, basis, watermark_nbits, token_max, EncryptSpec(Symbol(encrypt_spec)), HashSpec(hash_spec))
+     return Proposal(pid, spec_leaf.x, g, collector, basis, watermark_nbits, challenge_max, EncryptSpec(Symbol(encrypt_spec)), HashSpec(hash_spec))
 end
 
 function Parser.Tree(c::CastRecord)

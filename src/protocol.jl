@@ -80,21 +80,21 @@ struct Proposal{G <: Group}
     collector::G
     basis::GeneratorSetup{G} # new
     watermark_nbits::Int
-    token_max::Int # 
+    challenge_max::Int # 
     encrypt_spec::EncryptSpec
     hasher::HashSpec
 end
 
-function Proposal(pid::Integer, g::G, collector::G, verifier::Verifier; spec = UInt8[], watermark_nbits::Int=4, token_max::Int=9999_9999, encrypt_spec::EncryptSpec=AES256_SHA256(), hasher = verifier.prghash) where G <: Group
+function Proposal(pid::Integer, g::G, collector::G, verifier::Verifier; spec = UInt8[], watermark_nbits::Int=4, challenge_max::Int=9999_9999, encrypt_spec::EncryptSpec=AES256_SHA256(), hasher = verifier.prghash) where G <: Group
     
     # For safety reasons we shall derive both generators independently and not reuse g
     h, d = generator_basis(verifier, G, 2)
     basis = GeneratorSetup(h, d)
     
-    return Proposal(pid, spec, g, collector, basis, watermark_nbits, token_max, encrypt_spec, hasher)
+    return Proposal(pid, spec, g, collector, basis, watermark_nbits, challenge_max, encrypt_spec, hasher)
 end
 
-Base.:(==)(x::T, y::T) where T <: Proposal = x.pid == y.pid && x.spec == y.spec && x.g == y.g && x.collector == y.collector && x.basis == y.basis && x.watermark_nbits == y.watermark_nbits && x.token_max == y.token_max && x.encrypt_spec == y.encrypt_spec && x.hasher == y.hasher
+Base.:(==)(x::T, y::T) where T <: Proposal = x.pid == y.pid && x.spec == y.spec && x.g == y.g && x.collector == y.collector && x.basis == y.basis && x.watermark_nbits == y.watermark_nbits && x.challenge_max == y.challenge_max && x.encrypt_spec == y.encrypt_spec && x.hasher == y.hasher
 
 function compute_decoy_tracker_seed(proposal::Proposal{G}, seed::Vector{UInt8}) where G <: Group
 
@@ -119,22 +119,22 @@ function compute_tracker_preimage(proposal::Proposal{G}, seed::Vector{UInt8}) wh
     return compute_tracker_preimage(decoy_seed, proposal.hasher)
 end
 
-function compute_tracker(proposal::Proposal, seed::Vector{UInt8}, token::Integer)
+function compute_tracker(proposal::Proposal, seed::Vector{UInt8}, challenge::Integer)
 
     θ, λ = compute_tracker_preimage(proposal, seed)
 
-    T = tracker(θ, λ, token, order(proposal.g))
+    T = tracker(θ, λ, challenge, order(proposal.g))
 
     return proposal.hasher(int2octet(T))[1:8] |> octet2int
 end
 
-function verify_watermark(proposal::Proposal{G}, ux::G, token::Integer, hasher::HashSpec) where G <: Group
+function verify_watermark(proposal::Proposal{G}, ux::G, challenge::Integer, hasher::HashSpec) where G <: Group
     
-    (; token_max, watermark_nbits) = proposal
+    (; challenge_max, watermark_nbits) = proposal
 
-    nbits = ndigits(token_max, base=2) - 1
-    offset = token_max - 2^nbits
-    return verify_watermark(token - offset, nbits, octet(ux), hasher; num_positions = watermark_nbits)    
+    nbits = ndigits(challenge_max, base=2) - 1
+    offset = challenge_max - 2^nbits
+    return verify_watermark(challenge - offset, nbits, octet(ux), hasher; num_positions = watermark_nbits)    
 end
 
 function DecoyOpening(hasher::HashSpec, selection::Integer, decoy_seed::G) where G <: Group

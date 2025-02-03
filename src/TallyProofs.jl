@@ -31,7 +31,7 @@ include("extra.jl")
 include("parser.jl")
 
 export Proposal, CastOpening, tally, verify, count_votes, isconsistent, isbinding
-export VotingCalculator, assemble_vote!, get_token, compute_tracker, extract_opening, CastReceipt, seed
+export VotingCalculator, assemble_vote!, get_challenge, compute_tracker, extract_opening, CastReceipt, seed
 export create_decoy_credential!, install_decoy_tracker! # coercion resistance toolbox
 
 end

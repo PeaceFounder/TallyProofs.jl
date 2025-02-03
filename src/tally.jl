@@ -35,7 +35,7 @@ function commitment(vote::DecoyCommitment{G}, setup::GeneratorSetup{G}) where G 
 end
 
 struct TallyRecord
-    raw_tracker::BigInt
+    preimage_tracker::BigInt
     display_tracker::BigInt
     selection::BigInt
 end
@@ -68,38 +68,38 @@ function extract_supersession(cast_openings::Vector{<:CastOpening})
     return mask
 end
 
-function compute_tokens(seed::Vector{UInt8}, ux::Vector{G}, token_max::Int, watermark_nbits::Int, hasher::HashSpec) where G <: Group
+function compute_tracker_challenges(seed::Vector{UInt8}, ux::Vector{G}, challenge_max::Int, watermark_nbits::Int, hasher::HashSpec) where G <: Group
 
     prg = PRG(hasher, seed)
 
-    nbits = ndigits(token_max, base=2) - 1
-    offset = token_max - 2^nbits
+    nbits = ndigits(challenge_max, base=2) - 1
+    offset = challenge_max - 2^nbits
 
-    token_seeds = rand(prg, 0:BigInt(2)^nbits - 1, length(ux))
-    tokens = [apply_watermark(ti, nbits, octet(uxi), hasher; num_positions = watermark_nbits) + offset for (ti, uxi) in zip(token_seeds, ux)]
+    challenge_seeds = rand(prg, 0:BigInt(2)^nbits - 1, length(ux))
+    challenges = [apply_watermark(ti, nbits, octet(uxi), hasher; num_positions = watermark_nbits) + offset for (ti, uxi) in zip(challenge_seeds, ux)]
     
-    return tokens
+    return challenges
 end
 
-function token_seed(Q::Vector{G}, R::Vector{G}, hasher::HashSpec) where G <: Group
+function tracker_challenge_seed(Q::Vector{G}, R::Vector{G}, hasher::HashSpec) where G <: Group
     Q_vec = (octet(i) for i in Q)
     R_vec = (octet(i) for i in R)
     return hasher(UInt8[Iterators.flatten(R_vec) |> collect; Iterators.flatten(Q_vec) |> collect])
 end
 
-function decoy_token(seed::Vector{UInt8}, decoy_votes::Vector{DecoyCommitment{G}}, hasher) where G <: Group
+function compute_decoy_challenge(seed::Vector{UInt8}, decoy_votes::Vector{DecoyCommitment{G}}, hasher) where G <: Group
 
     Q′_vec = [i.Q for i in decoy_votes]
     R′_vec = [i.R for i in decoy_votes]
 
-    decoy_seed = [seed; token_seed(Q′_vec, R′_vec, hasher)]
+    decoy_seed = [seed; tracker_challenge_seed(Q′_vec, R′_vec, hasher)]
 
     return rand(PRG(hasher, decoy_seed), 2:order(G) - 1)
 end
 
 function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::Vector{CastOpening{G}}, hasher::HashSpec; skip_list = G[], mask = extract_supersession(cast_openings), dummy_votes::Vector{VoteOpening} = VoteOpening[]) where G <: Group
 
-    (; token_max, watermark_nbits) = proposal
+    (; challenge_max, watermark_nbits) = proposal
 
     public_cast_openings = @view(cast_openings[mask])
     
@@ -111,9 +111,9 @@ function tally(proposal::Proposal, cast_commitments::Vector{G}, cast_openings::V
     Q_vec = [i.record.commitment.Q for i in public_cast_openings]
     R_vec = [i.record.commitment.R for i in public_cast_openings]
     
-    seed = token_seed(Q_vec, R_vec, hasher)
-    tracker_challenges = compute_tokens(seed, Q_vec, token_max, watermark_nbits, hasher)#[mask]
-    decoy_challenge = decoy_token(seed, public_decoy_votes, hasher)
+    seed = tracker_challenge_seed(Q_vec, R_vec, hasher)
+    tracker_challenges = compute_tracker_challenges(seed, Q_vec, challenge_max, watermark_nbits, hasher)#[mask]
+    decoy_challenge = compute_decoy_challenge(seed, public_decoy_votes, hasher)
     merged_tracker_challenges = append!(tracker_challenges[skip_mask], (decoy_challenge for i in eachindex(dummy_votes)))
     
     vote_openings = (i.opening for i in @view(public_cast_openings[skip_mask])) # added here
@@ -184,7 +184,7 @@ function prove(proposition::Tally{G}, verifier::Verifier, cast_openings::Vector{
     dummy_vote_commitments = (commitment(i, proposition.proposal.basis) for i in dummy_votes)
     merged_vote_commitments = collect(VoteCommitment{G}, Iterators.flatten((vote_commitments, dummy_vote_commitments)))
     
-    reveal_proposition = TallyBoard(proposition.proposal.basis, merged_tracker_challenges, merged_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally_board])
+    reveal_proposition = TallyBoard(proposition.proposal.basis, merged_tracker_challenges, merged_vote_commitments, [VoteRecord(i.preimage_tracker, i.selection) for i in proposition.tally_board])
 
     vote_openings = (i.opening for i in @view(cast_openings[mask][skip_mask]))
 
@@ -238,7 +238,7 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     (; h, g) = proposition.proposal.basis
     proposition.proposal.basis == GeneratorSetup(h, g) || return false
     
-    (; token_max, watermark_nbits) = proposition.proposal
+    (; challenge_max, watermark_nbits) = proposition.proposal
     (; cast_records, cast_commitments) = proposition
 
     for i in cast_records
@@ -252,14 +252,14 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     supersession_proposition = Supersession(cast_commitments, h, u, ux, pok)
     verify(supersession_proposition, proof.supersession, verifier) || return false
 
-    # Verifying tokens
+    # Verifying challenges
     Q_vec = [i.commitment.Q for i in cast_records]
     R_vec = [i.commitment.R for i in cast_records]
-    seed = token_seed(Q_vec, R_vec, hasher)
-    tracker_challenges = compute_tokens(seed, Q_vec, token_max, watermark_nbits, hasher)
+    seed = tracker_challenge_seed(Q_vec, R_vec, hasher)
+    tracker_challenges = compute_tracker_challenges(seed, Q_vec, challenge_max, watermark_nbits, hasher)
 
     proposition.tracker_challenges == tracker_challenges || return false
-    proposition.decoy_challenge == decoy_token(seed, proposition.decoy_votes, hasher) || return false
+    proposition.decoy_challenge == compute_decoy_challenge(seed, proposition.decoy_votes, hasher) || return false
 
     # Making revaal shuffle taking into account skip_list and decoy_votes
     skip_mask = BitVector(!(x.signature.pbkey in proposition.skip_list) for x in cast_records)
@@ -270,7 +270,7 @@ function verify(proposition::Tally{G}, proof::TallyProof{G}, verifier::Verifier)
     reveal_vote_commitments = [i.commitment for i in @view(cast_records[skip_mask])]
     append!(reveal_vote_commitments, (commitment(i, proposition.proposal.basis) for i in proposition.decoy_votes))
 
-    reveal_proposition = TallyBoard(proposition.proposal.basis, tracker_challenges, reveal_vote_commitments, [VoteRecord(i.raw_tracker, i.selection) for i in proposition.tally_board])
+    reveal_proposition = TallyBoard(proposition.proposal.basis, tracker_challenges, reveal_vote_commitments, [VoteRecord(i.preimage_tracker, i.selection) for i in proposition.tally_board])
 
     verify(reveal_proposition, proof.reveal, verifier) || return false
 

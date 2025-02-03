@@ -59,7 +59,7 @@ cast_openings = CastOpening{G}[]
 
 # Public Bulletin Board
 pid = 1 # proposal identifier
-proposal = Proposal(pid, g, g^tallier_key, verifier; token_max=999)
+proposal = Proposal(pid, g, g^tallier_key, verifier; challenge_max=999)
 members = G[]
 cast_commitments = G[]
 
@@ -131,8 +131,8 @@ simulator = tally(proposal, cast_commitments, cast_openings, verifier)
 
 # Individual Verifiability
 @assert alice_receipt.id == b"Alice" "Cast receipt is not owned"
-alice_token = get_token(simulator.proposition, members, alice_receipt, proposal.hasher)
-alice_tracker = compute_tracker(alice, pid, alice_token, alice.pin)
+alice_challenge = get_challenge(simulator.proposition, members, alice_receipt, proposal.hasher)
+alice_tracker = compute_tracker(alice, pid, alice_challenge, alice.pin)
 N = findfirst(x -> x.display_tracker == alice_tracker, simulator.proposition.tally_board)
 @assert simulator.proposition.tally_board[N].selection == 3 "Vote is not cast as intended"
 

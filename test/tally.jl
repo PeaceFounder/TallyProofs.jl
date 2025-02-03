@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, extract_opening, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding, seed, extract_decoy_votes
+import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, CastReceipt, tally, get_challenge, compute_tracker, VoteEnvelope, extract_opening, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding, seed, extract_decoy_votes
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -20,9 +20,9 @@ ted_key = 56
 tallying_authorithy_key = 453
 
 # Buletin Board
-#proposal = Proposal(g, g^tallying_authorithy_key, verifier; encrypt_spec=TallyProofs.PlaintextMode(), token_max=999) 
+#proposal = Proposal(g, g^tallying_authorithy_key, verifier; encrypt_spec=TallyProofs.PlaintextMode(), challenge_max=999) 
 pid = 1 # proposal identifier
-proposal = Proposal(pid, g, g^tallying_authorithy_key, verifier; token_max=999)
+proposal = Proposal(pid, g, g^tallying_authorithy_key, verifier; challenge_max=999)
 @test Tree(convert(Proposal{G}, Tree(proposal))) == Tree(proposal)
 
 members = sort([g^x for x in [alice_key, bob_key, eve_key, ted_key]]) # In practice the list is obtained in braiding 
@@ -97,14 +97,14 @@ simulator = tally(proposal, cast_commitments, cast_openings, verifier; skip_list
 
 # now comes the verifications
 
-alice_token = get_token(simulator.proposition, members, alice_receipt, hasher)
-alice_tracker = compute_tracker(alice, pid, alice_token, pin) # this is a hash of the tracker
+alice_challenge = get_challenge(simulator.proposition, members, alice_receipt, hasher)
+alice_tracker = compute_tracker(alice, pid, alice_challenge, pin) # this is a hash of the tracker
 
 N = findfirst(x -> x.display_tracker == alice_tracker, simulator.proposition.tally_board)
 @test simulator.proposition.tally_board[N].selection == 3
 
-ted_token = get_token(simulator.proposition, members, ted_receipt, hasher)
-ted_tracker = compute_tracker(ted, pid, ted_token, pin) # this is a hash of the tracker
+ted_challenge = get_challenge(simulator.proposition, members, ted_receipt, hasher)
+ted_tracker = compute_tracker(ted, pid, ted_challenge, pin) # this is a hash of the tracker
 
 N = findfirst(x -> x.display_tracker == ted_tracker, simulator.proposition.tally_board)
 @test isnothing(N)
@@ -114,18 +114,18 @@ N = findfirst(x -> x.display_tracker == coercion_tracker, simulator.proposition.
 @test !isnothing(N)
 @test simulator.proposition.tally_board[N].selection == 11
 
-# eve installs decoy tracker before the tokens are anounced
+# eve installs decoy tracker before the challenges are anounced
 install_decoy_tracker!(eve, pid, coercion_tracker, fake_pin)
 
-eve_token = get_token(simulator.proposition, members, eve_receipt, hasher)
+eve_challenge = get_challenge(simulator.proposition, members, eve_receipt, hasher)
 
-@test get(eve, pid).trigger_token[] == nothing
-fake_eve_tracker = compute_tracker(eve, pid, eve_token, fake_pin)
-@test get(eve, pid).trigger_token[] == eve_token
+@test get(eve, pid).trigger_challenge[] == nothing
+fake_eve_tracker = compute_tracker(eve, pid, eve_challenge, fake_pin)
+@test get(eve, pid).trigger_challenge[] == eve_challenge
 
 @test fake_eve_tracker == coercion_tracker
 
-real_eve_tracker = compute_tracker(eve, pid, eve_token, pin)
+real_eve_tracker = compute_tracker(eve, pid, eve_challenge, pin)
 @test fake_eve_tracker != real_eve_tracker
 
 # pin codes must be indistinguishable to coercer hence:
@@ -134,16 +134,16 @@ second_fake_pin = 4566
 eve_seed2 = create_decoy_credential!(eve, second_fake_pin, pin)
 install_decoy_tracker!(eve, pid, coercion_tracker, second_fake_pin)
 
-second_eve_tracker = compute_tracker(eve, pid, eve_token, second_fake_pin)
+second_eve_tracker = compute_tracker(eve, pid, eve_challenge, second_fake_pin)
 @test second_eve_tracker == coercion_tracker
 
-# computing untriggered token
+# computing untriggered challenge
 
-nbits = ndigits(proposal.token_max; base=2) - 1
+nbits = ndigits(proposal.challenge_max; base=2) - 1
 
-reversed_eve_token = ~eve_token & ((1 << nbits) - 1)
-fake_eve_tracker = compute_tracker(eve, pid, reversed_eve_token, fake_pin)
-real_eve_tracker = compute_tracker(eve, pid, reversed_eve_token, pin)
+reversed_eve_challenge = ~eve_challenge & ((1 << nbits) - 1)
+fake_eve_tracker = compute_tracker(eve, pid, reversed_eve_challenge, fake_pin)
+real_eve_tracker = compute_tracker(eve, pid, reversed_eve_challenge, pin)
 
 @test fake_eve_tracker != real_eve_tracker
 
@@ -152,15 +152,15 @@ real_eve_tracker = compute_tracker(eve, pid, reversed_eve_token, pin)
 let 
     hits = 0
 
-    nbits = ndigits(proposal.token_max; base=2) - 1
-    start = proposal.token_max - 2^nbits
-    stop = proposal.token_max
+    nbits = ndigits(proposal.challenge_max; base=2) - 1
+    start = proposal.challenge_max - 2^nbits
+    stop = proposal.challenge_max
 
-    for trial_token in start:stop
+    for trial_challenge in start:stop
 
-        compute_tracker(eve, pid, trial_token, fake_pin; reset_trigger_token = true) # trigger_token
+        compute_tracker(eve, pid, trial_challenge, fake_pin; reset_trigger_challenge = true) # trigger_challenge
         
-        if get(eve, pid).trigger_token[] == trial_token
+        if get(eve, pid).trigger_challenge[] == trial_challenge
             hits += 1
         end
     end

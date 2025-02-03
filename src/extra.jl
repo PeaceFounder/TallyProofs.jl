@@ -4,7 +4,7 @@ struct CastReceipt
     w::Vector{UInt8} # the blinding factor
 end
 
-function get_token(tally::Tally{G}, members::Vector{G}, receipt::CastReceipt, hasher::HashSpec; skip_checks=false) where G <: Group
+function get_challenge(tally::Tally{G}, members::Vector{G}, receipt::CastReceipt, hasher::HashSpec; skip_checks=false) where G <: Group
 
     (; alias, id, w) = receipt
 

@@ -36,7 +36,7 @@ struct ProposalInstance{G<:Group}
     supersession::SupersessionCalculator{G}
     tracker::TrackerOpening
     current_selection::Ref{BigInt} # Perhaps change to mutable struct
-    trigger_token::Ref{Union{Int, Nothing}}
+    trigger_challenge::Ref{Union{Int, Nothing}}
     override_mask::Vector{OverrideMask}
 end
 
@@ -134,7 +134,7 @@ function create_decoy_credential!(calc::VotingCalculator, fake_pin::Int, authori
     end
 end
 
-function compute_tracker(voter::VotingCalculator, pid::Int, token::Integer, pin::Int; reset_trigger_token::Bool = false)
+function compute_tracker(voter::VotingCalculator, pid::Int, challenge::Integer, pin::Int; reset_trigger_challenge::Bool = false)
 
     if pin == voter.pin || pin in (i.pin for i in voter.decoys)
         instance = get(voter, pid)
@@ -145,8 +145,8 @@ function compute_tracker(voter::VotingCalculator, pid::Int, token::Integer, pin:
     (; hasher) = voter
     (Q, R) = commitment(instance.tracker, instance.proposal.basis)
 
-    if (isnothing(instance.trigger_token[]) || reset_trigger_token) && verify_watermark(instance.proposal, Q, token, hasher)
-        instance.trigger_token[] = token
+    if (isnothing(instance.trigger_challenge[]) || reset_trigger_challenge) && verify_watermark(instance.proposal, Q, challenge, hasher)
+        instance.trigger_challenge[] = challenge
     end
 
     # The computation is always present in spite if it is even to be superseeded by the mask
@@ -158,11 +158,11 @@ function compute_tracker(voter::VotingCalculator, pid::Int, token::Integer, pin:
         θ, λ = compute_tracker_preimage(instance.proposal, seed)
     end
 
-    t = tracker(θ, λ, token, order(instance.proposal.g))
+    t = tracker(θ, λ, challenge, order(instance.proposal.g))
 
     M = findlast(x -> x.pin == pin, instance.override_mask)
 
-    if instance.trigger_token[] == token && !isnothing(M)
+    if instance.trigger_challenge[] == challenge && !isnothing(M)
         return instance.override_mask[M].tracker 
     else
         return hasher(int2octet(t))[1:8] |> octet2int
