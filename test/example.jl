@@ -64,8 +64,8 @@ simulator = tally(proposal, cast_commitments, cast_openings, verifier)
 @assert alice_receipt.id == b"Alice" "Cast receipt is not owned"
 alice_token = get_token(simulator.proposition, members, alice_receipt, proposal.hasher)
 alice_tracker = compute_tracker(alice, pid, alice_token, alice.pin)
-N = findfirst(x -> x.display_tracker == alice_tracker, simulator.proposition.tally)
-@assert simulator.proposition.tally[N].selection == 3 "Vote is not cast as intended"
+N = findfirst(x -> x.display_tracker == alice_tracker, simulator.proposition.tally_board)
+@assert simulator.proposition.tally_board[N].selection == 3 "Vote is not cast as intended"
 
 # Counting of the votes
 count_votes(simulator.proposition)

@@ -2,7 +2,7 @@ using Test
 using TallyProofs
 using CryptoGroups
 using SigmaProofs
-import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, extract_opening, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding, seed
+import TallyProofs: Proposal, CastOpening, VotingCalculator, assemble_vote!, verify, CastReceipt, tally, get_token, compute_tracker, VoteEnvelope, extract_opening, install_decoy_tracker!, create_decoy_credential!, DecoyOpening, count_votes, isconsistent, isbinding, seed, extract_decoy_votes
 
 import SigmaProofs.Parser: Tree, encode
 
@@ -90,8 +90,8 @@ eve_seed = create_decoy_credential!(eve, fake_pin, pin)
 eve_receipt = cast_vote!(eve, proposal, 5, fake_pin)
 eve_receipt = cast_vote!(eve, proposal, 11, fake_pin)
 
-# Now the authorithy creates a few dummy votes
-decoy_votes = [DecoyOpening(8, 2:order(G) - 1), DecoyOpening(9, 2:order(G) - 1)]
+# By default decoy_votes = extract_decoy_votes(cast_openings)
+decoy_votes = append!(extract_decoy_votes(cast_openings), [DecoyOpening(8, 2:order(G) - 1), DecoyOpening(9, 2:order(G) - 1)])
 simulator = tally(proposal, cast_commitments, cast_openings, verifier; skip_list = [g^ted_key], decoy_votes)
 @test verify(simulator)
 
@@ -100,19 +100,19 @@ simulator = tally(proposal, cast_commitments, cast_openings, verifier; skip_list
 alice_token = get_token(simulator.proposition, members, alice_receipt, hasher)
 alice_tracker = compute_tracker(alice, pid, alice_token, pin) # this is a hash of the tracker
 
-N = findfirst(x -> x.display_tracker == alice_tracker, simulator.proposition.tally)
-@test simulator.proposition.tally[N].selection == 3
+N = findfirst(x -> x.display_tracker == alice_tracker, simulator.proposition.tally_board)
+@test simulator.proposition.tally_board[N].selection == 3
 
 ted_token = get_token(simulator.proposition, members, ted_receipt, hasher)
 ted_tracker = compute_tracker(ted, pid, ted_token, pin) # this is a hash of the tracker
 
-N = findfirst(x -> x.display_tracker == ted_tracker, simulator.proposition.tally)
+N = findfirst(x -> x.display_tracker == ted_tracker, simulator.proposition.tally_board)
 @test isnothing(N)
 
-coercion_tracker = compute_tracker(proposal, eve_seed, simulator.proposition.coercion_token)
-N = findfirst(x -> x.display_tracker == coercion_tracker, simulator.proposition.tally)
+coercion_tracker = compute_tracker(proposal, eve_seed, simulator.proposition.decoy_challenge)
+N = findfirst(x -> x.display_tracker == coercion_tracker, simulator.proposition.tally_board)
 @test !isnothing(N)
-@test simulator.proposition.tally[N].selection == 11
+@test simulator.proposition.tally_board[N].selection == 11
 
 # eve installs decoy tracker before the tokens are anounced
 install_decoy_tracker!(eve, pid, coercion_tracker, fake_pin)
@@ -170,7 +170,7 @@ end
 
 println("\nTally Board:\n")
 
-for i in simulator.proposition.tally
+for i in simulator.proposition.tally_board
     (; display_tracker, selection) = i
     short_tracker = div(display_tracker, 10^12)
     println("$(lpad(short_tracker, 9)) : $selection")
