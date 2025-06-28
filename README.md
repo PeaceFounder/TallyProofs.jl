@@ -194,6 +194,6 @@ The skip_list parameter specifies pseudonyms to exclude from tallying. The verif
 
 To cite this work, please use:
 
-Erdmanis, J. (2025). *Unconditional Individual Verifiability with Coercion Resistance via Post-Cast Isolation.* Manuscript in preparation.
+Erdmanis, J. (2025). *Unconditional Individual Verifiability with Receipt Freeness via Post-Cast Isolation.* https://eprint.iacr.org/2025/1186
 
-The paper describing the system's cryptographic protocols and security mechanisms is currently in the draft stage and may change with a more thorough analysis. 
+This paper presents a novel security mechanism called post-cast isolation that achieves individual verifiability without requiring trusted parties or components, while maintaining receipt freeness and practical everlasting privacy. The complementary coercion resistance mechanism, featuring a deniable yet enforceable nonce update system for vote stamping, will be addressed in a subsequent publication following the finalization of this work. An earlier draft that combined both mechanisms served as the preliminary version of this published preprint and is available upon request. 
