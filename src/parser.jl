@@ -81,7 +81,8 @@ function Base.convert(::Type{DecoyOpening}, tree::Tree)
 end
 
 #Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.record, Tree(c.opening, L), Tree(c.decoy, L), c.π_t))
-Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L), c.record, Tree(c.opening, L), Tree(c.decoy, L)))
+Parser.Tree(c::CastOpening, L::Int) = Tree((Leaf(c.β, L), Tree(c.history; L = L * 8), c.record, Tree(c.opening, L), Tree(c.decoy, L)))
+
 Parser.Tree(c::CastOpening{G}) where G <: Group = Tree(c, ndigits(order(G), base=256))
 
 function Base.convert(::Type{CastOpening{G}}, tree::Tree) where G <: Group

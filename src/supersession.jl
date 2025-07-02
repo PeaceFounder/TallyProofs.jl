@@ -54,9 +54,6 @@ function check_challenge(C::G, A::G, u::G, chg::Integer, spec::HashSpec) where G
     return C/A == u^p
 end
 
-exponent_field(::Type{G}) where G <: Group = FP{static(order(G))}
-
-
 function recommit!(calc::SupersessionCalculator{G}, chg::Integer; roprg = gen_roprg()) where G <: Group
 
     (; u, h, prghash, verifier) = calc
